@@ -11,7 +11,6 @@
   - MIME type inferred from the input
   - Several pastes at once
 - Fallback to `zwlr_data_control_manager_v1` (river, Wayfire, older sway)
-- Benchmarks
 - Packaging for the major distros
 
 ## Nice to have
