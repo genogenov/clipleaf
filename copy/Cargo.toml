@@ -1,7 +1,7 @@
 [package]
-name = "clip-for-fun-copy"
+name = "clipleaf-copy"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-clip-for-fun-core = { path = "../core" }
+clipleaf-core = { path = "../core" }

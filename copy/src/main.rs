@@ -12,7 +12,7 @@ use std::{
     process::ExitCode,
 };
 
-use clip_for_fun_core::{
+use clipleaf_core::{
     OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlDataControlSourceEvent, WlEvent, WlSessionManager,
     log_debug, log_error,
 };

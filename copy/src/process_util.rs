@@ -1,6 +1,6 @@
 use std::{env, fs, io, os::fd::AsRawFd};
 
-use clip_for_fun_core::ffi::{SIG_ERR, SIG_IGN, SIGHUP, dup2, fork, setsid, signal};
+use clipleaf_core::ffi::{SIG_ERR, SIG_IGN, SIGHUP, dup2, fork, setsid, signal};
 
 pub enum Forked {
     Parent,

@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn message_split_across_two_reads_is_returned() {
-        let path = std::env::temp_dir().join(format!("cff-test-{}.sock", std::process::id()));
+        let path = std::env::temp_dir().join(format!("clipleaf-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
         let t = std::thread::spawn(move || {

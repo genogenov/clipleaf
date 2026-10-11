@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::io::Result;
 use std::{ffi::OsString, os::unix::ffi::OsStrExt};
 
-use clip_for_fun_core::{Colors, LOGGER, log_debug, parse_mime};
+use clipleaf_core::{Colors, LOGGER, log_debug, parse_mime};
 
 #[derive(Debug)]
 pub struct PasteArgs {

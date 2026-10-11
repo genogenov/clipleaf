@@ -14,7 +14,7 @@ use std::{
     process::ExitCode,
 };
 
-use clip_for_fun_core::{
+use clipleaf_core::{
     OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager,
     ffi::{F_SETPIPE_SZ, fcntl},
     log_debug, log_error,

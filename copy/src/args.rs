@@ -3,7 +3,7 @@ use std::io::Result;
 use std::os::unix::ffi::OsStrExt;
 use std::{ffi::OsString, path::PathBuf};
 
-use clip_for_fun_core::{Colors, LOGGER, log_debug, parse_mime};
+use clipleaf_core::{Colors, LOGGER, log_debug, parse_mime};
 
 #[derive(Debug, PartialEq)]
 pub enum Input {

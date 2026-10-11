@@ -10,7 +10,7 @@ use std::{
     process, ptr,
 };
 
-use clip_for_fun_core::{
+use clipleaf_core::{
     ffi::{F_GETPIPE_SZ, F_SETFL, F_SETPIPE_SZ, fcntl, splice},
     log_debug,
 };
@@ -244,7 +244,11 @@ fn needs_fallback(e: &io::Error) -> bool {
 
 fn open_unlinked(dir: &Path) -> io::Result<File> {
     for _ in 0..5 {
-        let path = dir.join(format!(".cff-{}-{:016x}", process::id(), random_suffix()));
+        let path = dir.join(format!(
+            ".clipleaf-{}-{:016x}",
+            process::id(),
+            random_suffix()
+        ));
         match OpenOptions::new()
             .read(true)
             .write(true)
@@ -445,7 +449,7 @@ mod tests {
 
     #[test]
     fn missing_temp_dir_fails_only_when_spilling() {
-        let dir = env::temp_dir().join("cff-test-missing-dir");
+        let dir = env::temp_dir().join("clipleaf-test-missing-dir");
         assert!(!fs::exists(&dir).unwrap());
 
         let payload = store(&mut pipe_with(data(100 << 10)), &dir).unwrap();

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Times clip-for-fun and wl-clipboard with hyperfine and prints a markdown table of medians and memory use.
+# Times clipleaf and wl-clipboard with hyperfine and prints a markdown table of medians and memory use.
 set -uo pipefail
 
 usage() {
   cat <<'EOF'
 Usage: bench/bench.sh [--compositor sway|host] [--runs N]
 
-Times copy and paste of clip-for-fun and wl-clipboard with hyperfine, measures
+Times copy and paste of clipleaf and wl-clipboard with hyperfine, measures
 their memory and prints a markdown table of the medians. Every row is the same
 behavior in both tools: copies offer the same five text types without type
 detection (wl-copy gets -t text/plain for stdin), and each paste reads from the
@@ -45,10 +45,10 @@ fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cargo build --release --quiet --manifest-path "$root/Cargo.toml" || exit 1
-C=$root/target/release/clip-for-fun-copy
-P=$root/target/release/clip-for-fun-paste
+C=$root/target/release/clipleaf-copy
+P=$root/target/release/clipleaf-paste
 
-W=$(mktemp -d "${TMPDIR:-/tmp}/cff-bench.XXXXXX")
+W=$(mktemp -d "${TMPDIR:-/tmp}/clipleaf-bench.XXXXXX")
 compositor_pid=""
 
 start_sway() {
@@ -91,7 +91,8 @@ trap 'exit 130' INT TERM
 
 if [[ $compositor == sway ]]; then start_sway; else start_host; fi
 
-printf 'hello from clip-for-fun bench 1234567890' > "$W/small"
+words="hello from the clipleaf bench"
+printf '%s 1234567890' "$words" > "$W/small"
 head -c 100M /dev/urandom > "$W/big"
 
 # measure <id> <runs> <hyperfine options and command>: medians end up in $W/<id>.csv
@@ -111,7 +112,7 @@ median() { sort -n | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }'; }
 owner_kb() {
   local pid
   sleep 0.1
-  if [[ $1 == cff ]]; then pid=$(pgrep -n -f "^$C( |$)"); else pid=$(pgrep -n -x wl-copy); fi
+  if [[ $1 == clipleaf ]]; then pid=$(pgrep -n -f "^$C( |$)"); else pid=$(pgrep -n -x wl-copy); fi
   [[ -n $pid ]] || { echo "no background $1 copy process found" >&2; exit 1; }
   awk '/^VmRSS:/ { print $2 }' "/proc/$pid/status"
 }
@@ -133,7 +134,7 @@ measure_copy() {
 
 # The owner keeps serving in the background, so its stderr must not be the terminal: wl-copy reports the compositor exiting.
 own() {
-  if [[ $1 == cff ]]; then "$C" < "$2"; else wl-copy -t text/plain < "$2"; fi 2>> "$W/owner.err"
+  if [[ $1 == clipleaf ]]; then "$C" < "$2"; else wl-copy -t text/plain < "$2"; fi 2>> "$W/owner.err"
 }
 
 check_paste() {
@@ -142,18 +143,17 @@ check_paste() {
 }
 
 echo "copy..." >&2
-words="hello from clip-for-fun bench"
 text="'$words'"
-measure_copy copy-args cff "$runs" --prepare "sleep 0.05" "'$C' $text"
+measure_copy copy-args clipleaf "$runs" --prepare "sleep 0.05" "'$C' $text"
 measure_copy copy-args wl "$runs" --prepare "sleep 0.05" "wl-copy $text"
-measure_copy copy-small cff "$runs" --prepare "sleep 0.05" --input "$W/small" "'$C'"
+measure_copy copy-small clipleaf "$runs" --prepare "sleep 0.05" --input "$W/small" "'$C'"
 measure_copy copy-small wl "$runs" --prepare "sleep 0.05" --input "$W/small" "wl-copy -t text/plain"
-measure_copy copy-big cff "$big_runs" --prepare "sleep 0.1" --input "$W/big" "'$C'"
+measure_copy copy-big clipleaf "$big_runs" --prepare "sleep 0.1" --input "$W/big" "'$C'"
 measure_copy copy-big wl "$big_runs" --prepare "sleep 0.1" --input "$W/big" "wl-copy -t text/plain"
 
 echo "paste..." >&2
-for tool in cff wl; do
-  if [[ $tool == cff ]]; then paste_cmd=("$P" -t text/plain); else paste_cmd=(wl-paste -n -t text/plain); fi
+for tool in clipleaf wl; do
+  if [[ $tool == clipleaf ]]; then paste_cmd=("$P" -t text/plain); else paste_cmd=(wl-paste -n -t text/plain); fi
   quoted="'${paste_cmd[0]}' ${paste_cmd[*]:1}"
   file=small
   own "$tool" "$W/small"
@@ -176,20 +176,20 @@ esac
 cpu=$(awk -F': ' '/model name/ { print $2; exit }' /proc/cpuinfo)
 
 mem_mib() { awk '{ printf "%.1f", $1 / 1024 }' "$W/$1.mem"; }
-# row <case> <id> <clip-for-fun command> <wl-clipboard command>
+# row <case> <id> <clipleaf command> <wl-clipboard command>
 row() {
   printf '| %s<br>`%s`<br>`%s` | %s ms | %s ms | %s MiB | %s MiB |\n' "$1" "$3" "$4" \
-    "$(median_ms "$2.cff")" "$(median_ms "$2.wl")" "$(mem_mib "$2.cff")" "$(mem_mib "$2.wl")"
+    "$(median_ms "$2.clipleaf")" "$(median_ms "$2.wl")" "$(mem_mib "$2.clipleaf")" "$(mem_mib "$2.wl")"
 }
 echo
-echo "| | clip-for-fun time | wl-clipboard time | clip-for-fun memory | wl-clipboard memory |"
+echo "| | clipleaf time | wl-clipboard time | clipleaf memory | wl-clipboard memory |"
 echo "| --- | ---: | ---: | ---: | ---: |"
-row "Copy a ${#words} B text argument" copy-args 'clip-for-fun-copy <text>' 'wl-copy <text>'
-row 'Copy 40 B from stdin' copy-small clip-for-fun-copy 'wl-copy -t text/plain'
-row 'Copy 100 MiB from stdin' copy-big clip-for-fun-copy 'wl-copy -t text/plain'
-row 'Paste 40 B to `/dev/null`' paste-small 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
-row 'Paste 100 MiB to `/dev/null`' paste-big-null 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
-row 'Paste 100 MiB to a file' paste-big-file 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
+row "Copy a ${#words} B text argument" copy-args 'clipleaf-copy <text>' 'wl-copy <text>'
+row 'Copy 40 B from stdin' copy-small clipleaf-copy 'wl-copy -t text/plain'
+row 'Copy 100 MiB from stdin' copy-big clipleaf-copy 'wl-copy -t text/plain'
+row 'Paste 40 B to `/dev/null`' paste-small 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
+row 'Paste 100 MiB to `/dev/null`' paste-big-null 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
+row 'Paste 100 MiB to a file' paste-big-file 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
 echo
 echo "Median of $runs runs ($big_runs for 100 MiB) with $(hyperfine --version), $where, $(wl-copy --version | head -1), $cpu, Linux $(uname -r)."
 echo "Memory is resident memory: for copies, of the background process that keeps the copy available; for pastes, the median peak of 5 runs (for wl-paste, the larger of wl-paste and the cat it runs)."

@@ -1,4 +1,4 @@
 [package]
-name = "clip-for-fun-core"
+name = "clipleaf-core"
 version.workspace = true
 edition.workspace = true

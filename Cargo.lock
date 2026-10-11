@@ -3,19 +3,19 @@
 version = 4
 
 [[package]]
-name = "clip-for-fun-copy"
+name = "clipleaf-copy"
 version = "0.1.0"
 dependencies = [
- "clip-for-fun-core",
+ "clipleaf-core",
 ]
 
 [[package]]
-name = "clip-for-fun-core"
+name = "clipleaf-core"
 version = "0.1.0"
 
 [[package]]
-name = "clip-for-fun-paste"
+name = "clipleaf-paste"
 version = "0.1.0"
 dependencies = [
- "clip-for-fun-core",
+ "clipleaf-core",
 ]
