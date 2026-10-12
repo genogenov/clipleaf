@@ -37,6 +37,8 @@ pub const F_GETPIPE_SZ: i32 = 1032;
 
 pub const F_SETPIPE_SZ: i32 = 1031;
 
+pub const F_GETFL: i32 = 3;
+
 pub const F_SETFL: i32 = 4;
 
 pub const SCM_RIGHTS: i32 = 0x01;
@@ -52,6 +54,50 @@ pub const SIGHUP: i32 = 1; // same on every Linux arch
 pub const SIG_IGN: usize = 1;
 
 pub const SIG_ERR: usize = usize::MAX;
+
+// O_TMPFILE = __O_TMPFILE | O_DIRECTORY; differ between architectures.
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "arm",
+    target_arch = "powerpc",
+    target_arch = "powerpc64",
+    target_arch = "m68k"
+))]
+pub const O_TMPFILE: i32 = (1 << 22) | (1 << 14);
+
+#[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+pub const O_TMPFILE: i32 = (1 << 25) | (1 << 16);
+#[cfg(not(any(
+    target_arch = "aarch64",
+    target_arch = "arm",
+    target_arch = "powerpc",
+    target_arch = "powerpc64",
+    target_arch = "m68k",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+)))]
+pub const O_TMPFILE: i32 = (1 << 22) | (1 << 16); // kernel default: x86, riscv, loongarch, s390x, mips
+
+#[cfg(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+))]
+pub const O_NONBLOCK: i32 = 1 << 7;
+
+#[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+pub const O_NONBLOCK: i32 = 1 << 14;
+
+#[cfg(not(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+)))]
+pub const O_NONBLOCK: i32 = 1 << 11;
 
 #[cfg(not(any(
     target_arch = "mips",

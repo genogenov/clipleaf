@@ -1,6 +1,4 @@
 use std::{
-    fs::File,
-    io::{ErrorKind, Write},
     os::{
         fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
         unix::net::UnixStream,
@@ -9,12 +7,14 @@ use std::{
     ptr,
 };
 
-use crate::ffi::{
-    CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, SCM_RIGHTS, SOL_SOCKET, cmsg_align, cmsg_space,
-    cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+use crate::{
+    fd_io::{FD_BUFFER_LEN, InFdBuffer},
+    ffi::{
+        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, SCM_RIGHTS, SOL_SOCKET, cmsg_align,
+        cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+    },
 };
 
-const FD_BUFFER_LEN: usize = 32;
 const USIZE: usize = size_of::<usize>();
 
 pub const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
@@ -23,104 +23,6 @@ pub const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of
 struct AlignedCmsghdr {
     _align: [cmsghdr; 0], // force cmsghdr alignment
     buff: [u8; CTRL_BUFFER_SIZE],
-}
-
-pub struct InFdBuffer {
-    in_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
-    in_fd_count: usize,
-    in_fds_cursor: usize,
-}
-
-pub struct OutFdBuffer {
-    out_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
-    out_fd_count: usize,
-}
-
-pub trait FdWriteAndClose {
-    fn fd_write_and_close(self, buf: &[u8]) -> std::io::Result<()>;
-}
-
-impl FdWriteAndClose for OwnedFd {
-    fn fd_write_and_close(self, buf: &[u8]) -> std::io::Result<()> {
-        match File::from(self).write_all(buf) {
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-}
-impl InFdBuffer {
-    pub fn new() -> Self {
-        Self {
-            in_fds: [const { None }; FD_BUFFER_LEN],
-            in_fd_count: 0,
-            in_fds_cursor: 0,
-        }
-    }
-
-    pub fn pop_last_in_fd(&mut self) -> Option<OwnedFd> {
-        // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
-        if self.in_fd_count == 0 {
-            return None;
-        }
-        let fd = self.in_fds[self.in_fds_cursor].take();
-        self.in_fds_cursor = (self.in_fds_cursor + 1) % self.in_fds.len();
-        self.in_fd_count -= 1;
-        fd
-    }
-
-    fn push_in_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
-        // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
-        if self.in_fd_count >= self.in_fds.len() {
-            return Err(std::io::Error::other(
-                "Not enough space in buffer for file descriptors",
-            ));
-        }
-        self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = Some(fd);
-        self.in_fd_count += 1;
-        Ok(())
-    }
-}
-
-impl OutFdBuffer {
-    pub fn new() -> Self {
-        Self {
-            out_fds: [const { None }; FD_BUFFER_LEN],
-            out_fd_count: 0,
-        }
-    }
-
-    pub fn push_out_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
-        if self.out_fd_count >= self.out_fds.len() {
-            return Err(std::io::Error::other(
-                "Not enough space in output buffer for file descriptors",
-            ));
-        }
-        self.out_fds[self.out_fd_count] = Some(fd);
-        self.out_fd_count += 1;
-        Ok(())
-    }
-
-    pub fn peek_out_fds(&self) -> &[Option<OwnedFd>] {
-        &self.out_fds[..self.out_fd_count]
-    }
-
-    pub fn truncate_out(&mut self, truncate_count: usize) {
-        if truncate_count > self.out_fd_count {
-            return;
-        }
-        for slot in &mut self.out_fds[self.out_fd_count - truncate_count..self.out_fd_count] {
-            *slot = None;
-        }
-        self.out_fd_count -= truncate_count;
-    }
-
-    pub fn clear_and_close_out_fds(&mut self) {
-        for slot in &mut self.out_fds[..self.out_fd_count] {
-            *slot = None;
-        }
-        self.out_fd_count = 0;
-    }
 }
 
 pub struct UnixFdStream {
@@ -295,56 +197,10 @@ impl UnixFdStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Read, time::Duration};
+    use std::fs::File;
 
     fn dev_null() -> OwnedFd {
         File::open("/dev/null").unwrap().into()
-    }
-
-    // Reads EOF only once every other handle to the peer socket is closed.
-    fn assert_peer_closed(mut keep: UnixStream) {
-        keep.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        assert_eq!(keep.read(&mut [0u8; 1]).unwrap(), 0);
-    }
-
-    #[test]
-    fn in_fds_pop_in_fifo_order_across_wraparound() {
-        let mut buf = InFdBuffer::new();
-        // 3 does not divide FD_BUFFER_LEN, so some rounds straddle the wrap point.
-        for _ in 0..FD_BUFFER_LEN {
-            let fds: [OwnedFd; 3] = std::array::from_fn(|_| dev_null());
-            let expected = fds.each_ref().map(|fd| fd.as_raw_fd());
-            for fd in fds {
-                buf.push_in_fd(fd).unwrap();
-            }
-            for raw in expected {
-                assert_eq!(buf.pop_last_in_fd().unwrap().as_raw_fd(), raw);
-            }
-        }
-        assert!(buf.pop_last_in_fd().is_none());
-    }
-
-    #[test]
-    fn in_fds_overflow_is_an_error() {
-        let mut buf = InFdBuffer::new();
-        for _ in 0..FD_BUFFER_LEN {
-            buf.push_in_fd(dev_null()).unwrap();
-        }
-        assert!(buf.push_in_fd(dev_null()).is_err());
-    }
-
-    #[test]
-    fn queued_fds_are_closed_when_the_buffer_is_dropped() {
-        let (keep_in, queued_in) = UnixStream::pair().unwrap();
-        let (keep_out, queued_out) = UnixStream::pair().unwrap();
-        let mut in_fds = InFdBuffer::new();
-        let mut out_fds = OutFdBuffer::new();
-        in_fds.push_in_fd(queued_in.into()).unwrap();
-        out_fds.push_out_fd(queued_out.into()).unwrap();
-        drop(in_fds);
-        drop(out_fds);
-        assert_peer_closed(keep_in);
-        assert_peer_closed(keep_out);
     }
 
     #[test]

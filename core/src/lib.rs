@@ -1,5 +1,5 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
-
+mod fd_io;
 pub mod ffi;
 #[doc(hidden)]
 mod log_writer;
@@ -24,6 +24,6 @@ pub use wl::{
     wl_session_manager::WlSessionManager,
 };
 
+pub use fd_io::{serve_bytes, serve_file};
 pub use log_writer::{Colors, LOGGER};
 pub use mime::parse_mime;
-pub use unix_fd_stream::FdWriteAndClose;

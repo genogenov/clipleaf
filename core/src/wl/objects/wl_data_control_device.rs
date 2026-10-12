@@ -1,5 +1,5 @@
 use crate::{
-    unix_fd_stream::InFdBuffer,
+    fd_io::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,

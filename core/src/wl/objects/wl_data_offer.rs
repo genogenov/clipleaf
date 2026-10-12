@@ -1,8 +1,8 @@
 use std::{borrow::Cow, os::fd::OwnedFd};
 
 use crate::{
+    fd_io::InFdBuffer,
     log_debug, parse_mime,
-    unix_fd_stream::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
@@ -173,7 +173,7 @@ impl PartialEq for WlDataControlOffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FdWriteAndClose, wl::wl_buffered_stream::WlBufferedStream};
+    use crate::{fd_io::serve_bytes, wl::wl_buffered_stream::WlBufferedStream};
     use std::{io::Read, os::unix::net::UnixStream, time::Duration};
 
     fn offer_with(types: &[&[u8]]) -> WlDataControlOffer {
@@ -280,10 +280,7 @@ mod tests {
             (offer_id, u16::from(WlDataControlOfferOps::Receive))
         );
         assert_eq!(WlMessageReader::new(body).str(), Some(&b"text/plain"[..]));
-        fds.pop_last_in_fd()
-            .unwrap()
-            .fd_write_and_close(b"hello")
-            .unwrap();
+        serve_bytes(fds.pop_last_in_fd().unwrap(), b"hello").unwrap();
 
         let (header, ..) = compositor.read_next_message().unwrap().unwrap();
         assert_eq!(

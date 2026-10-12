@@ -1,11 +1,17 @@
-use std::path::Path;
+use std::{
+    env,
+    ffi::OsString,
+    io::{self, ErrorKind},
+    path::{Path, PathBuf},
+};
 
 pub type NextMessageResult<'a> =
     std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut InFdBuffer)>>;
 
 use crate::{
+    fd_io::{InFdBuffer, OutFdBuffer},
     log_debug,
-    unix_fd_stream::{InFdBuffer, OutFdBuffer, UnixFdStream},
+    unix_fd_stream::UnixFdStream,
     wl::{objects::MessageHeader, wl_message_writer::WlMessageWriter},
 };
 
@@ -39,9 +45,40 @@ pub struct WlStreamWriter<'a> {
     tx: &'a mut WriteBuffer,
 }
 
+fn socket_path(
+    display_path: Option<OsString>,
+    runtime_dir: Option<OsString>,
+) -> io::Result<PathBuf> {
+    let display_path_or_default = display_path.unwrap_or_else(|| OsString::from("wayland-0"));
+    let display = Path::new(&display_path_or_default);
+    if display.is_absolute() {
+        return Ok(display.to_path_buf());
+    }
+
+    let runtime_dir = runtime_dir
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
+
+    Ok(Path::new(&runtime_dir).join(display))
+}
+
 impl WlBufferedStream {
     pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
         Ok(Self::new(UnixFdStream::connect(socket_path)?))
+    }
+
+    pub fn connect_from_env() -> std::io::Result<Self> {
+        let socket_path = socket_path(
+            env::var_os("WAYLAND_DISPLAY"),
+            env::var_os("XDG_RUNTIME_DIR"),
+        )?;
+        log_debug!("Wayland socket path: {}", socket_path.display());
+
+        Self::connect(&socket_path).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!("cannot connect to {}: {e}", socket_path.display()),
+            )
+        })
     }
 
     pub(crate) fn new(socket: UnixFdStream) -> Self {
@@ -175,7 +212,7 @@ impl WriteBuffer {
 mod tests {
     use super::*;
     use crate::{
-        FdWriteAndClose,
+        fd_io::serve_bytes,
         wl::objects::wl_display::{DisplayOps, WlDisplay},
     };
     use std::io::{Read, Write};
@@ -233,10 +270,7 @@ mod tests {
                 (header.object_id, header.size),
                 (7, MessageHeader::WL_HEADER_SIZE)
             );
-            fds.pop_last_in_fd()
-                .unwrap()
-                .fd_write_and_close(payload)
-                .unwrap();
+            serve_bytes(fds.pop_last_in_fd().unwrap(), payload).unwrap();
         }
 
         for (mut reader, expected) in [first_read, second_read].into_iter().zip(payloads) {
@@ -247,6 +281,38 @@ mod tests {
             let mut got = Vec::new();
             reader.read_to_end(&mut got).unwrap();
             assert_eq!(got, expected);
+        }
+    }
+
+    #[test]
+    fn socket_path_joins_the_display_name_to_the_runtime_dir() {
+        let dir = || Some(OsString::from("/run/user/1000"));
+        assert_eq!(
+            socket_path(None, dir()).unwrap(),
+            Path::new("/run/user/1000/wayland-0")
+        );
+        assert_eq!(
+            socket_path(Some("wayland-1".into()), dir()).unwrap(),
+            Path::new("/run/user/1000/wayland-1")
+        );
+    }
+
+    #[test]
+    fn an_absolute_display_is_used_as_is() {
+        for dir in [None, Some(OsString::from("/run/user/1000"))] {
+            assert_eq!(
+                socket_path(Some("/tmp/sway/wayland-5".into()), dir).unwrap(),
+                Path::new("/tmp/sway/wayland-5")
+            );
+        }
+    }
+
+    #[test]
+    fn a_relative_display_needs_the_runtime_dir() {
+        for display in [None, Some(OsString::from("wayland-1"))] {
+            let err = socket_path(display, None).unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::NotFound);
+            assert!(err.to_string().contains("XDG_RUNTIME_DIR"), "{err}");
         }
     }
 

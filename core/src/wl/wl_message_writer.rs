@@ -1,7 +1,7 @@
 use std::{mem::forget, os::fd::OwnedFd};
 
 use crate::{
-    unix_fd_stream::OutFdBuffer,
+    fd_io::OutFdBuffer,
     wl::{
         objects::{MessageHeader, WlObject, WlStr},
         wl_message_router::WlPendingId,

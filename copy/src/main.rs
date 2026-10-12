@@ -3,12 +3,10 @@ mod payload;
 mod process_util;
 use std::{
     env,
-    ffi::OsString,
     fs::File,
     io::{self, ErrorKind, Write, stdin},
     ops::ControlFlow,
     os::{fd::AsFd, unix::ffi::OsStringExt},
-    path::PathBuf,
     process::ExitCode,
 };
 
@@ -69,19 +67,7 @@ fn run() -> io::Result<()> {
         )?,
     };
 
-    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
-        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
-
-    let socket_path = PathBuf::from(&runtime_dir)
-        .join(env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| OsString::from("wayland-0")));
-    log_debug!("Wayland socket path: {}", socket_path.display());
-
-    let stream = WlBufferedStream::connect(&socket_path).map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("cannot connect to {}: {e}", socket_path.display()),
-        )
-    })?;
+    let stream = WlBufferedStream::connect_from_env()?;
     log_debug!("Successfully connected to the Wayland socket");
 
     let mut mgr = WlSessionManager::initialize(stream)?;
