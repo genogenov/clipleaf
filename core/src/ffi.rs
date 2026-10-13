@@ -47,6 +47,8 @@ pub const MSG_CTRUNC: i32 = 0x8;
 
 pub const MSG_CMSG_CLOEXEC: i32 = 0x40000000;
 
+pub const MSG_DONTWAIT: i32 = 0x40;
+
 pub const CMSG_FD_OFFSET: usize = cmsg_align(std::mem::size_of::<cmsghdr>());
 
 pub const SIGHUP: i32 = 1; // same on every Linux arch

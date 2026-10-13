@@ -8,16 +8,16 @@ use std::{
 };
 
 use crate::{
-    fd_io::{FD_BUFFER_LEN, InFdBuffer},
+    fd_io::{InFdBuffer, OUT_FD_BUFFER_LEN},
     ffi::{
-        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, SCM_RIGHTS, SOL_SOCKET, cmsg_align,
-        cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, SCM_RIGHTS, SOL_SOCKET,
+        cmsg_align, cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
     },
 };
 
 const USIZE: usize = size_of::<usize>();
 
-pub const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
+pub const CTRL_BUFFER_SIZE: usize = cmsg_space(OUT_FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
 
 #[repr(C)]
 struct AlignedCmsghdr {
@@ -37,12 +37,24 @@ impl From<UnixStream> for UnixFdStream {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub(crate) enum ReadMode {
+    Block,
+
+    NonBlock,
+}
+
 impl UnixFdStream {
     pub fn connect(path: &Path) -> std::io::Result<Self> {
         Ok(UnixStream::connect(path)?.into())
     }
 
-    pub fn read(&self, buffer: &mut [u8], fd_buffer: &mut InFdBuffer) -> std::io::Result<usize> {
+    pub(crate) fn read(
+        &self,
+        buffer: &mut [u8],
+        fd_buffer: &mut InFdBuffer,
+        mode: ReadMode,
+    ) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
             iov_len: buffer.len(),
@@ -64,9 +76,12 @@ impl UnixFdStream {
                 msg_flags: 0,
             };
 
+            let mut flags = MSG_CMSG_CLOEXEC;
+            if mode == ReadMode::NonBlock {
+                flags |= MSG_DONTWAIT;
+            }
             // SAFETY: msg points at iov/control buffers for the call; the kernel writes at most their lengths.
-            let bytes_read_or_err =
-                unsafe { recvmsg(self.stream_fd.as_raw_fd(), &mut msg, MSG_CMSG_CLOEXEC) };
+            let bytes_read_or_err = unsafe { recvmsg(self.stream_fd.as_raw_fd(), &mut msg, flags) };
 
             if bytes_read_or_err < 0 {
                 let error = std::io::Error::last_os_error();
@@ -80,9 +95,6 @@ impl UnixFdStream {
                 return Ok(0); // EOF
             }
 
-            if msg.msg_flags & MSG_CTRUNC != 0 {
-                return Err(std::io::Error::other("Control message truncated"));
-            }
             let mut ctrl = &ctrl_buffer.buff[..msg.msg_controllen];
             while let Some(hdr) = ctrl.first_chunk::<CMSG_FD_OFFSET>() {
                 let len = usize::from_ne_bytes(hdr[..USIZE].try_into().unwrap());
@@ -108,6 +120,11 @@ impl UnixFdStream {
                 ctrl = ctrl.get(cmsg_align(len)..).unwrap_or(&[]);
             }
 
+            // intentionally after handlihng the fds to avoid leaking them if the read fails
+            if msg.msg_flags & MSG_CTRUNC != 0 {
+                return Err(std::io::Error::other("Control message truncated"));
+            }
+
             return Ok(bytes_read_or_err as usize);
         }
     }
@@ -115,7 +132,7 @@ impl UnixFdStream {
     pub fn write(&self, data: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
         if fds.is_empty() {
             self.send_all(&mut [], data)
-        } else if fds.len() > FD_BUFFER_LEN {
+        } else if fds.len() > OUT_FD_BUFFER_LEN {
             Err(std::io::Error::other("Too many file descriptors to send"))
         } else {
             let fds_bytes_len: usize = fds.len() * std::mem::size_of::<RawFd>();
@@ -207,7 +224,7 @@ mod tests {
     fn write_rejects_more_fds_than_the_control_buffer_holds() {
         let (a, _b) = UnixStream::pair().unwrap();
         let stream = UnixFdStream::from(a);
-        let fds: Vec<Option<OwnedFd>> = (0..=FD_BUFFER_LEN).map(|_| Some(dev_null())).collect();
+        let fds: Vec<Option<OwnedFd>> = (0..=OUT_FD_BUFFER_LEN).map(|_| Some(dev_null())).collect();
         assert!(stream.write(b"x", &fds).is_err());
     }
 }

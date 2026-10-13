@@ -90,7 +90,7 @@ impl WlDataControlDevice {
             self.local_id,
         )?;
         msg.pack_u32(source_id)?;
-        msg.end();
+        msg.end()?;
         Ok(())
     }
 
@@ -104,7 +104,7 @@ impl WlDataControlDevice {
             self.local_id,
         )?;
         msg.pack_u32(source_id)?;
-        msg.end();
+        msg.end()?;
         Ok(())
     }
 }

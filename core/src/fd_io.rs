@@ -15,23 +15,26 @@ use crate::{
     log_debug,
 };
 
-pub const FD_BUFFER_LEN: usize = 32;
+pub const IN_FD_BUFFER_LEN: usize = 64;
+
+// kernel limit - everything above gets truncated.
+pub const OUT_FD_BUFFER_LEN: usize = 28;
 
 pub struct InFdBuffer {
-    in_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
+    in_fds: [Option<OwnedFd>; IN_FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
 }
 
 pub struct OutFdBuffer {
-    out_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
+    out_fds: [Option<OwnedFd>; OUT_FD_BUFFER_LEN],
     out_fd_count: usize,
 }
 
 impl InFdBuffer {
     pub fn new() -> Self {
         Self {
-            in_fds: [const { None }; FD_BUFFER_LEN],
+            in_fds: [const { None }; IN_FD_BUFFER_LEN],
             in_fd_count: 0,
             in_fds_cursor: 0,
         }
@@ -64,9 +67,13 @@ impl InFdBuffer {
 impl OutFdBuffer {
     pub fn new() -> Self {
         Self {
-            out_fds: [const { None }; FD_BUFFER_LEN],
+            out_fds: [const { None }; OUT_FD_BUFFER_LEN],
             out_fd_count: 0,
         }
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.out_fd_count >= self.out_fds.len()
     }
 
     pub fn push_out_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
@@ -82,16 +89,6 @@ impl OutFdBuffer {
 
     pub fn peek_out_fds(&self) -> &[Option<OwnedFd>] {
         &self.out_fds[..self.out_fd_count]
-    }
-
-    pub fn truncate_out(&mut self, truncate_count: usize) {
-        if truncate_count > self.out_fd_count {
-            return;
-        }
-        for slot in &mut self.out_fds[self.out_fd_count - truncate_count..self.out_fd_count] {
-            *slot = None;
-        }
-        self.out_fd_count -= truncate_count;
     }
 
     pub fn clear_and_close_out_fds(&mut self) {
@@ -519,8 +516,8 @@ mod tests {
     #[test]
     fn in_fds_pop_in_fifo_order_across_wraparound() {
         let mut buf = InFdBuffer::new();
-        // 3 does not divide FD_BUFFER_LEN, so some rounds straddle the wrap point.
-        for _ in 0..FD_BUFFER_LEN {
+        // 3 does not divide IN_FD_BUFFER_LEN, so some rounds straddle the wrap point.
+        for _ in 0..IN_FD_BUFFER_LEN {
             let fds: [OwnedFd; 3] = std::array::from_fn(|_| dev_null());
             let expected = fds.each_ref().map(|fd| fd.as_raw_fd());
             for fd in fds {
@@ -536,7 +533,7 @@ mod tests {
     #[test]
     fn in_fds_overflow_is_an_error() {
         let mut buf = InFdBuffer::new();
-        for _ in 0..FD_BUFFER_LEN {
+        for _ in 0..IN_FD_BUFFER_LEN {
             buf.push_in_fd(dev_null()).unwrap();
         }
         assert!(buf.push_in_fd(dev_null()).is_err());

@@ -58,7 +58,7 @@ impl WlDisplay {
             writer.begin_message::<WlDisplay>(DisplayOps::GetRegistry, WlDisplay::TYPE_ID)?;
         let id = router.register_client(WlInterface::Registry)?;
         msg.pack_new_object_id(&id)?;
-        msg.end();
+        msg.end()?;
 
         Ok(WlRegistry::new(id.commit()))
     }
@@ -71,7 +71,7 @@ impl WlDisplay {
         let mut msg = writer.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID)?;
         let callback_id = router.register_client(WlInterface::Callback)?;
         msg.pack_new_object_id(&callback_id)?;
-        msg.end();
+        msg.end()?;
         self.callback_id = callback_id.commit();
         Ok(())
     }

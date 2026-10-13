@@ -40,8 +40,7 @@ impl WlDataControlSource {
         let mut msg = writer
             .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id)?;
         msg.pack_str(mime_type)?;
-        msg.end();
-        Ok(())
+        msg.end()
     }
 
     pub fn parse_message<'a>(

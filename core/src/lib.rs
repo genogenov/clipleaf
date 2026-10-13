@@ -19,9 +19,9 @@ pub use wl::{
     },
     wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
-    wl_message_router::{WlEvent, WlMessageRouter},
+    wl_message_router::WlMessageRouter,
     wl_offer_tracker::WlOfferTracker,
-    wl_session_manager::WlSessionManager,
+    wl_session_manager::{WlSessionEvent, WlSessionManager},
 };
 
 pub use fd_io::{serve_bytes, serve_file};

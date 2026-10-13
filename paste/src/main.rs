@@ -7,13 +7,12 @@ use std::{
         ErrorKind::{self, InvalidInput},
         IsTerminal, Write,
     },
-    ops::ControlFlow,
     os::fd::{AsRawFd, OwnedFd},
     process::ExitCode,
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager,
     ffi::{F_SETPIPE_SZ, fcntl},
     log_debug, log_error,
 };
@@ -59,10 +58,7 @@ fn init() -> io::Result<WlSessionManager> {
     log_debug!("Starting Paste loop");
     mgr.sync()?;
 
-    mgr.dispatch_messages(&mut |ev| match ev {
-        WlEvent::SyncDone => ControlFlow::Break(Ok(())),
-        _ => ControlFlow::Continue(()),
-    })?;
+    while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone) {}
     Ok(mgr)
 }
 

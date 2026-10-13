@@ -5,14 +5,13 @@ use std::{
     env,
     fs::File,
     io::{self, ErrorKind, Write, stdin},
-    ops::ControlFlow,
     os::{fd::AsFd, unix::ffi::OsStringExt},
     process::ExitCode,
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlDataControlSourceEvent, WlEvent, WlSessionManager,
-    log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager, log_debug,
+    log_error,
 };
 
 use crate::{
@@ -90,48 +89,45 @@ fn run() -> io::Result<()> {
     mgr.sync()?;
 
     let mut detached = args.foreground;
-    mgr.dispatch_messages(&mut |wl_event| match wl_event {
-        WlEvent::DataControlSource {
-            id: _,
-            event: WlDataControlSourceEvent::Send { mime_type: _, fd },
-        } => {
-            log_debug!("Received send event with fd {:?}", fd);
 
-            // Serve to pasting client via fd it sent.
-            if let Err(e) = input.serve(fd) {
-                log_error!("Failed to write to fd: {}", e);
-            }
-            ControlFlow::Continue(())
-        }
-        WlEvent::DataControlSource {
-            id: _,
-            event: WlDataControlSourceEvent::Cancelled,
-        } => {
-            log_debug!("Received cancelled event. Exiting...");
-            ControlFlow::Break(Ok(()))
-        }
-        WlEvent::SyncDone if !detached => {
-            log_debug!("Received SyncDone - detaching from terminal");
-            detached = true;
-            match process_util::fork_process() {
-                Ok(process_util::Forked::Parent) => {
-                    log_debug!("Parent process exiting after fork");
-                    ControlFlow::Break(Ok(()))
+    loop {
+        match mgr.next_event()? {
+            WlSessionEvent::DataControlSend { fd, .. } => {
+                log_debug!("Received send event with fd {:?}", fd);
+
+                // Serve to pasting client via fd it sent.
+                if let Err(e) = input.serve(fd) {
+                    log_error!("Failed to write to fd: {}", e);
                 }
-                Ok(process_util::Forked::Child) => {
-                    if let Err(e) = process_util::detach() {
-                        log_error!("Failed to detach child process: {}", e);
-                    } else {
-                        log_debug!("Successfully detached child process from terminal");
+            }
+            WlSessionEvent::DataControlCancelled { .. } => {
+                log_debug!("Received cancelled event. Exiting...");
+                return Ok(());
+            }
+            WlSessionEvent::SyncDone if !detached => {
+                log_debug!("Received SyncDone - detaching from terminal");
+                detached = true;
+                match process_util::fork_process() {
+                    Ok(process_util::Forked::Parent) => {
+                        log_debug!("Parent process exiting after fork");
+                        return Ok(());
                     }
-                    ControlFlow::Continue(())
+                    Ok(process_util::Forked::Child) => {
+                        if let Err(e) = process_util::detach() {
+                            log_error!("Failed to detach child process: {}", e);
+                        } else {
+                            log_debug!("Successfully detached child process from terminal");
+                        }
+                    }
+                    Err(e) => {
+                        return Err(io::Error::new(
+                            e.kind(),
+                            format!("Failed to fork process: {e}"),
+                        ));
+                    }
                 }
-                Err(e) => ControlFlow::Break(Err(io::Error::new(
-                    e.kind(),
-                    format!("Failed to fork process: {e}"),
-                ))),
             }
+            _ => {}
         }
-        _ => ControlFlow::Continue(()),
-    })
+    }
 }

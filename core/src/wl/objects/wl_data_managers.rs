@@ -29,7 +29,7 @@ pub trait DataDeviceManagerExt {
         let data_device_id = router.register_client(WlInterface::DataControlDevice)?;
         msg.pack_new_object_id(&data_device_id)?;
         msg.pack_u32(seat_id)?;
-        msg.end();
+        msg.end()?;
         let id = data_device_id.commit();
         Ok(WlDataControlDevice { local_id: id })
     }
@@ -46,7 +46,7 @@ pub trait DataDeviceManagerExt {
         let data_source_id = router.register_client(WlInterface::DataControlSource)?;
 
         msg.pack_new_object_id(&data_source_id)?;
-        msg.end();
+        msg.end()?;
 
         Ok(WlDataControlSource {
             local_id: data_source_id.commit(),
