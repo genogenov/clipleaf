@@ -169,26 +169,6 @@ impl WlMessageRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wl::wl_buffered_stream::WlBufferedStream;
-    use std::{io::Write, os::unix::net::UnixStream};
-
-    fn msg(object_id: u32, opcode: u16, body: &[u8]) -> Vec<u8> {
-        let mut m = Vec::with_capacity(8 + body.len());
-        m.extend_from_slice(&object_id.to_ne_bytes());
-        m.extend_from_slice(&(((8 + body.len()) as u32) << 16 | u32::from(opcode)).to_ne_bytes());
-        m.extend_from_slice(body);
-        m
-    }
-
-    // The peer end plays the compositor.
-    fn setup() -> (WlMessageRouter, WlBufferedStream, UnixStream) {
-        let (a, peer) = UnixStream::pair().unwrap();
-        (
-            WlMessageRouter::new(),
-            WlBufferedStream::new(a.into()),
-            peer,
-        )
-    }
 
     #[test]
     fn ids_are_dense_and_reused_after_free_client() {
@@ -231,77 +211,81 @@ mod tests {
         assert_eq!(router.lookup_slot(2), Some(WlInterface::Seat));
     }
 
-    // #[test]
-    // fn next_event_returns_the_interface_header_and_body_of_registered_objects() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let (mut reader, _) = stream.split();
-    //     let device = router
-    //         .register_client(WlInterface::DataControlDevice)
-    //         .unwrap()
-    //         .commit();
-    //     let offer = router
-    //         .register_server_object(WlInterface::DataControlOffer, 0xff00_0001)
-    //         .unwrap();
+    #[test]
+    fn lookup_returns_the_interface_of_live_client_and_server_objects() {
+        let mut router = WlMessageRouter::new();
+        let device = router
+            .register_client(WlInterface::DataControlDevice)
+            .unwrap()
+            .commit();
+        let offer = router
+            .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START + 1)
+            .unwrap();
 
-    //     let mut bytes = msg(device, 1, &7u32.to_ne_bytes());
-    //     bytes.extend(msg(offer, 0, &[]));
-    //     peer.write_all(&bytes).unwrap();
+        assert_eq!(
+            router.lookup_interface(1).unwrap(),
+            Some(WlInterface::Display)
+        );
+        assert_eq!(
+            router.lookup_interface(device).unwrap(),
+            Some(WlInterface::DataControlDevice)
+        );
+        assert_eq!(
+            router.lookup_interface(offer).unwrap(),
+            Some(WlInterface::DataControlOffer)
+        );
+    }
 
-    //     assert!(matches!(
-    //         router.next_event(&mut reader).unwrap(),
-    //         Some(WlEventReadResult::Event(WlInterface::DataControlDevice, h, body, _))
-    //             if h.object_id == device && h.opcode == 1 && body == 7u32.to_ne_bytes()
-    //     ));
-    //     assert!(matches!(
-    //         router.next_event(&mut reader).unwrap(),
-    //         Some(WlEventReadResult::Event(WlInterface::DataControlOffer, h, body, _))
-    //             if h.object_id == offer && body.is_empty()
-    //     ));
+    #[test]
+    fn freed_or_unknown_server_objects_are_skipped_but_unknown_client_objects_are_errors() {
+        let mut router = WlMessageRouter::new();
+        let offer = router
+            .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START)
+            .unwrap();
+        router.free_server(offer).unwrap();
 
-    //     drop(peer);
-    //     assert!(router.next_event(&mut reader).unwrap().is_none(), "EOF");
-    // }
+        // An offer we destroyed can still have events in flight: not an error.
+        assert_eq!(router.lookup_interface(offer).unwrap(), None);
+        // Never registered, and past the end of the table: also just skipped.
+        assert_eq!(router.lookup_interface(SERVER_ID_START + 5).unwrap(), None);
+        assert_eq!(router.lookup_interface(u32::MAX).unwrap(), None);
 
-    // #[test]
-    // fn freed_or_unknown_server_objects_are_ignored_but_unknown_client_objects_are_errors() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let (mut reader, _) = stream.split();
-    //     let offer = router
-    //         .register_server_object(WlInterface::DataControlOffer, 0xff00_0000)
-    //         .unwrap();
-    //     router.free_server(offer).unwrap();
+        // A client id that is free, reserved, or beyond the table means our bookkeeping is wrong.
+        for id in [0, 9, MAX_REGISTERED_INTERFACES as u32, SERVER_ID_START - 1] {
+            let err = router.lookup_interface(id).unwrap_err();
+            assert!(
+                err.to_string().contains("unknown client object"),
+                "{id}: {err}"
+            );
+        }
+    }
 
-    //     let mut bytes = msg(offer, 0, &[]);
-    //     bytes.extend(msg(0xff00_0005, 0, &[]));
-    //     bytes.extend(msg(9, 0, &[]));
-    //     peer.write_all(&bytes).unwrap();
+    #[test]
+    fn a_freed_client_object_is_unknown_again() {
+        let mut router = WlMessageRouter::new();
+        let callback = router
+            .register_client(WlInterface::Callback)
+            .unwrap()
+            .commit();
+        assert!(router.lookup_interface(callback).unwrap().is_some());
+        router.free_client(callback);
+        assert!(router.lookup_interface(callback).is_err());
+    }
 
-    //     for _ in 0..2 {
-    //         assert!(matches!(
-    //             router.next_event(&mut reader).unwrap(),
-    //             Some(WlEventReadResult::Ignored)
-    //         ));
-    //     }
-    //     assert!(matches!(
-    //         router.next_event(&mut reader).unwrap(),
-    //         Some(WlEventReadResult::Error(_))
-    //     ));
-    // }
-
-    // #[test]
-    // fn server_ids_outside_the_table_are_rejected() {
-    //     let mut router = WlMessageRouter::new();
-    //     let past_the_end = SERVER_ID_START + MAX_REGISTERED_INTERFACES as u32;
-    //     assert!(
-    //         router
-    //             .register_server_object(WlInterface::DataControlOffer, past_the_end)
-    //             .is_err()
-    //     );
-    //     assert!(
-    //         router
-    //             .register_server_object(WlInterface::DataControlOffer, 5)
-    //             .is_err()
-    //     );
-    //     assert!(router.free_server(5).is_err());
-    // }
+    #[test]
+    fn server_ids_outside_the_table_are_rejected() {
+        let mut router = WlMessageRouter::new();
+        let past_the_end = SERVER_ID_START + MAX_REGISTERED_INTERFACES as u32;
+        assert!(
+            router
+                .register_server_object(WlInterface::DataControlOffer, past_the_end)
+                .is_err()
+        );
+        assert!(
+            router
+                .register_server_object(WlInterface::DataControlOffer, 5)
+                .is_err()
+        );
+        assert!(router.free_server(5).is_err());
+    }
 }

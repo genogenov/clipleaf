@@ -111,6 +111,7 @@ impl WlBufferedStream {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn read_next_message(&mut self, mode: ReadMode) -> NextMessageResult<'_> {
         self.rx.next_message(&self.socket, mode)
     }
@@ -236,78 +237,6 @@ impl WriteBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        fd_io::serve_bytes,
-        wl::objects::wl_display::{DisplayOps, WlDisplay},
-    };
-    use std::io::{Read, Write};
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::time::Duration;
-
-    fn stream_pair() -> (WlBufferedStream, WlBufferedStream) {
-        let (a, b) = UnixStream::pair().unwrap();
-        (
-            WlBufferedStream::new(a.into()),
-            WlBufferedStream::new(b.into()),
-        )
-    }
-
-    // #[test]
-    // fn messages_round_trip_through_writer_and_reader() {
-    //     let (mut tx, mut rx) = stream_pair();
-    //     for (id, op) in [(3, DisplayOps::Sync), (4, DisplayOps::GetRegistry)] {
-    //         let mut msg = tx.get_writer().begin_message::<WlDisplay>(op, id).unwrap();
-    //         msg.pack_u32(42).unwrap();
-    //         msg.end();
-    //     }
-    //     tx.write().unwrap();
-
-    //     for (id, opcode) in [(3, 0), (4, 1)] {
-    //         let (header, buf, _) = rx.read_next_message().unwrap().unwrap();
-    //         assert_eq!(
-    //             (header.object_id, header.opcode, header.size),
-    //             (id, opcode, 12)
-    //         );
-    //         assert_eq!(u32::from_ne_bytes(buf[..4].try_into().unwrap()), 42);
-    //     }
-    // }
-
-    // #[test]
-    // fn fds_arrive_in_order_and_sender_copies_are_closed() {
-    //     let (mut tx, mut rx) = stream_pair();
-    //     let (first_read, first_write) = UnixStream::pair().unwrap();
-    //     let (second_read, second_write) = UnixStream::pair().unwrap();
-    //     for fd in [first_write, second_write] {
-    //         let mut msg = tx
-    //             .get_writer()
-    //             .begin_message::<WlDisplay>(DisplayOps::Sync, 7)
-    //             .unwrap();
-    //         msg.pack_fd(fd.into()).unwrap();
-    //         msg.end();
-    //     }
-    //     tx.write().unwrap();
-
-    //     let payloads: [&[u8]; 2] = [b"first", b"second"];
-    //     for payload in payloads {
-    //         let (header, _, fds) = rx.read_next_message().unwrap().unwrap();
-    //         // fd arguments add no bytes to the message
-    //         assert_eq!(
-    //             (header.object_id, header.size),
-    //             (7, MessageHeader::WL_HEADER_SIZE)
-    //         );
-    //         serve_bytes(fds.pop_last_in_fd().unwrap(), payload).unwrap();
-    //     }
-
-    //     for (mut reader, expected) in [first_read, second_read].into_iter().zip(payloads) {
-    //         // Times out instead of hanging if tx kept its copy of the write end open.
-    //         reader
-    //             .set_read_timeout(Some(Duration::from_secs(1)))
-    //             .unwrap();
-    //         let mut got = Vec::new();
-    //         reader.read_to_end(&mut got).unwrap();
-    //         assert_eq!(got, expected);
-    //     }
-    // }
 
     #[test]
     fn socket_path_joins_the_display_name_to_the_runtime_dir() {
@@ -340,28 +269,4 @@ mod tests {
             assert!(err.to_string().contains("XDG_RUNTIME_DIR"), "{err}");
         }
     }
-
-    // #[test]
-    // fn message_split_across_two_reads_is_returned() {
-    //     let path = std::env::temp_dir().join(format!("clipleaf-test-{}.sock", std::process::id()));
-    //     let _ = std::fs::remove_file(&path);
-    //     let listener = UnixListener::bind(&path).unwrap();
-    //     let t = std::thread::spawn(move || {
-    //         let (mut s, _) = listener.accept().unwrap();
-    //         // 12-byte message: object_id=5, opcode=0, size=12, body u32=42
-    //         let mut msg = Vec::new();
-    //         msg.extend_from_slice(&5u32.to_ne_bytes());
-    //         msg.extend_from_slice(&(12u32 << 16).to_ne_bytes());
-    //         msg.extend_from_slice(&42u32.to_ne_bytes());
-    //         s.write_all(&msg[..8]).unwrap(); // header only
-    //         std::thread::sleep(std::time::Duration::from_millis(100));
-    //         s.write_all(&msg[8..]).unwrap(); // body arrives later
-    //         std::thread::sleep(std::time::Duration::from_millis(100));
-    //     });
-    //     let mut stream = WlBufferedStream::connect(&path).unwrap();
-    //     let got = stream.read_next_message().unwrap();
-    //     let ok = matches!(&got, Some((h, _, _)) if h.object_id == 5 && h.size == 12);
-    //     t.join().unwrap();
-    //     assert!(ok, "split message was not returned");
-    // }
 }
