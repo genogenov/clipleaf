@@ -12,8 +12,24 @@ pub trait WlObject {
     type Events;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WlInterface {
+    Display,
+    Callback,
+    Registry,
+    Seat,
+    ExtDataControlManager,
+    ZwlrDataControlManager,
+    DataDeviceManager,
+    DataControlDevice,
+    DataControlSource,
+    DataControlOffer,
+}
+
 pub trait WlGlobal: WlObject {
+    const NAME: WlStr;
     const MAX_VERSION: u32;
+    const INTERFACE: WlInterface;
 }
 
 pub enum NoEvents {}

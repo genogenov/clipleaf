@@ -7,16 +7,15 @@ use std::{
 use crate::{
     BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt,
     ExtDataControlManagerV1, WlBufferedStream, WlDataControlDevice, WlDataControlOffer,
-    WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker,
+    WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker, WlSeat,
     log_debug,
     unix_fd_stream::ReadMode,
     wl::{
         objects::{
-            WlCallbackEvents, wl_data_source::WlDataControlSource, wl_display::DisplayEvent,
-            wl_registry::WlRegistry,
+            WlCallbackEvents, WlGlobal, WlInterface, wl_data_source::WlDataControlSource,
+            wl_display::DisplayEvent, wl_registry::WlRegistry,
         },
         wl_buffered_stream::{WlStreamWriter, WlWireMessage},
-        wl_message_router::WlInterface::{self},
         wl_message_writer::WlMessageWriter,
     },
 };
@@ -71,10 +70,10 @@ impl WlSessionManager {
 
         log_debug!("Got registry: {:?}", registry);
 
-        if let Some(ext_data_control_manager) = registry.ext_data_control_manager {
+        if let Some(ext_data_control_manager) = registry.get::<ExtDataControlManagerV1>() {
             log_debug!(
                 "Found ExtDataControlManagerV1({}) with id {} and version {}",
-                ext_data_control_manager.interface_name.str,
+                ExtDataControlManagerV1::NAME.str,
                 ext_data_control_manager.global_name,
                 ext_data_control_manager.version
             );
@@ -84,7 +83,7 @@ impl WlSessionManager {
             let seat_local = registry.bind(
                 stream.get_writer(),
                 &mut router,
-                registry.wl_seat.ok_or_else(|| {
+                registry.get::<WlSeat>().ok_or_else(|| {
                     std::io::Error::new(std::io::ErrorKind::NotFound, "wl_seat not found")
                 })?,
             )?;
@@ -287,7 +286,7 @@ impl WlSessionManager {
                 }
             }
             WlInterface::Registry => {
-                registry.add_interface(&header, &mut WlMessageReader::new(body));
+                registry.handle_event(&header, &mut WlMessageReader::new(body))?;
                 Ok(None)
             }
         }

@@ -1,7 +1,7 @@
 use crate::wl::{
-    objects::{WlObject, wl_enum, wl_registry::WlRegistry},
+    objects::{WlInterface, WlObject, wl_enum, wl_registry::WlRegistry},
     wl_message_reader::WlMessageReader,
-    wl_message_router::{WlInterface, WlMessageRouter},
+    wl_message_router::WlMessageRouter,
     wl_message_writer::WlMessageWriter,
 };
 

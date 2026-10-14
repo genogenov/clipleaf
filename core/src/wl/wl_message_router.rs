@@ -1,21 +1,7 @@
-use crate::log_debug;
+use crate::{log_debug, wl::objects::WlInterface};
 use std::io::{self, Error, Result};
 
 const SERVER_ID_START: u32 = 0xff000000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WlInterface {
-    Display,
-    Callback,
-    Registry,
-    Seat,
-    ExtDataControlManager,
-    ZwlrDataControlManager,
-    DataDeviceManager,
-    DataControlDevice,
-    DataControlSource,
-    DataControlOffer,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {

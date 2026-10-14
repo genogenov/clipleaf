@@ -2,13 +2,10 @@ use crate::{
     WlMessageRouter,
     wl::{
         objects::{
-            NoEvents, WlGlobal, WlObject,
-            wl_data_control_device::WlDataControlDevice,
-            wl_data_source::WlDataControlSource,
-            wl_enum,
-            wl_registry::{BoundInterface, RegistryInterface},
+            NoEvents, WlGlobal, WlInterface, WlObject, WlStr,
+            wl_data_control_device::WlDataControlDevice, wl_data_source::WlDataControlSource,
+            wl_enum, wl_registry::BoundInterface, wl_str_bytes,
         },
-        wl_message_router::WlInterface,
         wl_message_writer::WlMessageWriter,
     },
 };
@@ -63,6 +60,8 @@ impl WlObject for ExtDataControlManagerV1 {
 
 impl WlGlobal for ExtDataControlManagerV1 {
     const MAX_VERSION: u32 = 1;
+    const NAME: WlStr = wl_str_bytes!("ext_data_control_manager_v1");
+    const INTERFACE: WlInterface = WlInterface::ExtDataControlManager;
 }
 
 wl_enum! {
@@ -79,8 +78,11 @@ impl WlObject for ZwlrDataControlManagerV1 {
     type Ops = ZwlrDataControlManagerOps;
     type Events = NoEvents;
 }
+
 impl WlGlobal for ZwlrDataControlManagerV1 {
     const MAX_VERSION: u32 = 2;
+    const NAME: WlStr = wl_str_bytes!("zwlr_data_control_manager_v1");
+    const INTERFACE: WlInterface = WlInterface::ZwlrDataControlManager;
 }
 wl_enum! {
     pub enum ZwlrDataControlManagerOps {
@@ -113,10 +115,6 @@ wl_enum! {
 pub enum WlDataDeviceManagerEvents {
     // DragAndDrop(DragAndDrop),
 }
-
-pub type DataControlManager = RegistryInterface<ExtDataControlManagerV1>;
-pub type ZwlrDataControlManager = RegistryInterface<ZwlrDataControlManagerV1>;
-pub type DataDeviceManager = RegistryInterface<WlDataDeviceManager>;
 
 impl DataDeviceManagerExt for BoundInterface<ZwlrDataControlManagerV1> {
     fn manager_id(&self) -> u32 {
