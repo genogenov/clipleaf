@@ -40,7 +40,7 @@ impl InFdBuffer {
         }
     }
 
-    pub fn pop_last_in_fd(&mut self) -> Option<OwnedFd> {
+    pub fn pop_in_fd(&mut self) -> Option<OwnedFd> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
         if self.in_fd_count == 0 {
             return None;
@@ -275,10 +275,10 @@ mod tests {
                 buf.push_in_fd(fd).unwrap();
             }
             for raw in expected {
-                assert_eq!(buf.pop_last_in_fd().unwrap().as_raw_fd(), raw);
+                assert_eq!(buf.pop_in_fd().unwrap().as_raw_fd(), raw);
             }
         }
-        assert!(buf.pop_last_in_fd().is_none());
+        assert!(buf.pop_in_fd().is_none());
     }
 
     #[test]

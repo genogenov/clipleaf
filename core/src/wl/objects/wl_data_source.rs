@@ -56,12 +56,18 @@ impl WlDataControlSource {
             return Ok(WlDataControlSourceEvent::Send {
                 mime_type,
                 fd: fds
-                    .pop_last_in_fd()
+                    .pop_in_fd()
                     .ok_or_else(|| std::io::Error::other("Failed to pop file descriptor"))?,
             });
         } else if opcode == WlDataControlSourceEvents::Cancelled as u16 {
             return Ok(WlDataControlSourceEvent::Cancelled);
         }
         Err(std::io::Error::other("Unknown opcode"))
+    }
+
+    pub fn destroy(self, writer: WlMessageWriter) -> std::io::Result<()> {
+        let msg = writer
+            .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Destroy, self.local_id)?;
+        msg.end()
     }
 }

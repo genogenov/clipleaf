@@ -16,6 +16,7 @@ use crate::{
             wl_display::DisplayEvent, wl_registry::WlRegistry,
         },
         wl_buffered_stream::{WlStreamWriter, WlWireMessage},
+        wl_message_router::Route,
         wl_message_writer::WlMessageWriter,
     },
 };
@@ -158,6 +159,13 @@ impl WlSessionManager {
         }
     }
 
+    pub fn destroy_source(&mut self, source: WlDataControlSource) -> std::io::Result<()> {
+        let local_id = source.local_id;
+        source.destroy(self.stream.get_writer())?;
+        self.router.mark_destroyed_client(local_id)?;
+        Ok(())
+    }
+
     fn read_event(
         stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
@@ -171,12 +179,35 @@ impl WlSessionManager {
             writer.write()?;
 
             let msg = reader.read_next_message(mode)?;
-            let Some(interface) = router.lookup_interface(msg.0.object_id)? else {
-                continue;
-            };
-            if let Some(event) =
-                Self::handle_event(router, registry, tracker, &mut writer, interface, msg)?
-            {
+            if let Some(event) = match router.lookup_interface(msg.0.object_id)? {
+                Route::Destroyed(WlInterface::DataControlSource) => {
+                    log_debug!(
+                        "Received message for destroyed DataControlSource object_id: {:?}",
+                        msg.0.object_id
+                    );
+                    drop(WlDataControlSource::parse_message(
+                        msg.0.opcode,
+                        msg.1,
+                        msg.2,
+                    )?);
+                    None
+                }
+                Route::Destroyed(other) => {
+                    return Err(io::Error::other(format!(
+                        "destroyed {other:?} not supported"
+                    )));
+                }
+                Route::Ignored => {
+                    log_debug!(
+                        "Received message for ignored object_id: {:?}",
+                        msg.0.object_id
+                    );
+                    continue;
+                }
+                Route::Live(interface) => {
+                    Self::handle_event(router, registry, tracker, &mut writer, interface, msg)?
+                }
+            } {
                 return Ok(event);
             }
         }
@@ -302,46 +333,6 @@ impl WlSessionManager {
         tracker.remove(id);
         router.free_server(id)
     }
-
-    // fn dispatch<F>(
-    //     stream: &mut WlBufferedStream,
-    //     router: &mut WlMessageRouter,
-    //     registry: &mut WlRegistry,
-    //     tracker: &mut WlOfferTracker,
-    //     fnhandler: &mut F,
-    // ) -> Result<(), std::io::Error>
-    // where
-    //     F: WlMessageHandler,
-    // {
-    //     log_debug!("Starting message dispatch loop");
-    //     let (mut reader, mut writer) = stream.split();
-    //     loop {
-    //         // Requests queued by handlers must reach the compositor before blocking on a read.
-    //         writer.write()?;
-
-    //         let Some(event) = router.next_event(&mut reader, ReadMode::Block)? else {
-    //             break;
-    //         };
-    //         let Some(event_result) =
-    //             (match Self::handle_event(router, registry, tracker, &mut writer, event)
-    //                 .continue_ok()
-    //             {
-    //                 Ok(it) => it,
-    //                 Err(err) => return err,
-    //             })
-    //         else {
-    //             continue;
-    //         };
-    //         if let ControlFlow::Break(result) = fnhandler(event_result) {
-    //             return result;
-    //         }
-    //     }
-
-    //     Err(std::io::Error::new(
-    //         ErrorKind::UnexpectedEof,
-    //         "Unexpected end of stream",
-    //     ))
-    // }
 
     pub fn get_message_writer(&mut self) -> WlMessageWriter<'_> {
         self.stream.get_writer()
