@@ -103,15 +103,16 @@ impl WlMessageRouter {
 
     pub fn mark_destroyed_client(&mut self, object_id: u32) -> Result<()> {
         if let Some(slot) = self.client_interfaces.get_mut(object_id as usize)
-            && let Slot::Live(interface) = *slot {
-                *slot = Slot::Destroyed(interface);
-                log_debug!(
-                    "Marked interface {:?} at client slot {} as destroyed",
-                    interface,
-                    object_id
-                );
-                return Ok(());
-            }
+            && let Slot::Live(interface) = *slot
+        {
+            *slot = Slot::Destroyed(interface);
+            log_debug!(
+                "Marked interface {:?} at client slot {} as destroyed",
+                interface,
+                object_id
+            );
+            return Ok(());
+        }
         Err(Error::other(format!(
             "Invalid client slot id {} for marking destroyed",
             object_id
@@ -214,80 +215,143 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn a_dropped_pending_id_frees_its_slot() {
-    //     let mut router = WlMessageRouter::new();
-    //     let pending = router.register_client(WlInterface::Registry).unwrap();
-    //     assert_eq!(pending.id(), 2);
-    //     drop(pending);
-    //     assert_eq!(router.lookup_slot(2), None);
-    //     assert_eq!(
-    //         router.register_client(WlInterface::Seat).unwrap().commit(),
-    //         2
-    //     );
-    //     assert_eq!(router.lookup_slot(2), Some(WlInterface::Seat));
-    // }
+    fn lookup_error(router: &WlMessageRouter, id: u32) -> String {
+        router
+            .lookup_interface(id)
+            .err()
+            .expect("an error")
+            .to_string()
+    }
 
-    // #[test]
-    // fn lookup_returns_the_interface_of_live_client_and_server_objects() {
-    //     let mut router = WlMessageRouter::new();
-    //     let device = router
-    //         .register_client(WlInterface::DataControlDevice)
-    //         .unwrap()
-    //         .commit();
-    //     let offer = router
-    //         .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START + 1)
-    //         .unwrap();
+    #[test]
+    fn a_dropped_pending_id_frees_its_slot() {
+        let mut router = WlMessageRouter::new();
+        let pending = router.register_client(WlInterface::Registry).unwrap();
+        assert_eq!(pending.id(), 2);
+        drop(pending);
+        assert!(lookup_error(&router, 2).contains("Unknown client object"));
+        assert_eq!(
+            router.register_client(WlInterface::Seat).unwrap().commit(),
+            2
+        );
+        assert!(matches!(
+            router.lookup_interface(2),
+            Ok(Route::Live(WlInterface::Seat))
+        ));
+    }
 
-    //     assert_eq!(
-    //         router.lookup_interface(1).unwrap(),
-    //         Some(WlInterface::Display)
-    //     );
-    //     assert_eq!(
-    //         router.lookup_interface(device).unwrap(),
-    //         Some(WlInterface::DataControlDevice)
-    //     );
-    //     assert_eq!(
-    //         router.lookup_interface(offer).unwrap(),
-    //         Some(WlInterface::DataControlOffer)
-    //     );
-    // }
+    #[test]
+    fn lookup_returns_the_interface_of_live_client_and_server_objects() {
+        let mut router = WlMessageRouter::new();
+        let device = router
+            .register_client(WlInterface::DataControlDevice)
+            .unwrap()
+            .commit();
+        let offer = router
+            .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START + 1)
+            .unwrap();
 
-    // #[test]
-    // fn freed_or_unknown_server_objects_are_skipped_but_unknown_client_objects_are_errors() {
-    //     let mut router = WlMessageRouter::new();
-    //     let offer = router
-    //         .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START)
-    //         .unwrap();
-    //     router.free_server(offer).unwrap();
+        assert!(matches!(
+            router.lookup_interface(1),
+            Ok(Route::Live(WlInterface::Display))
+        ));
+        assert!(matches!(
+            router.lookup_interface(device),
+            Ok(Route::Live(WlInterface::DataControlDevice))
+        ));
+        assert!(matches!(
+            router.lookup_interface(offer),
+            Ok(Route::Live(WlInterface::DataControlOffer))
+        ));
+    }
 
-    //     // An offer we destroyed can still have events in flight: not an error.
-    //     assert_eq!(router.lookup_interface(offer).unwrap(), None);
-    //     // Never registered, and past the end of the table: also just skipped.
-    //     assert_eq!(router.lookup_interface(SERVER_ID_START + 5).unwrap(), None);
-    //     assert_eq!(router.lookup_interface(u32::MAX).unwrap(), None);
+    #[test]
+    fn freed_server_objects_are_ignored_but_bad_client_ids_and_ids_past_the_tables_are_errors() {
+        let mut router = WlMessageRouter::new();
+        let offer = router
+            .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START)
+            .unwrap();
+        router.free_server(offer).unwrap();
 
-    //     // A client id that is free, reserved, or beyond the table means our bookkeeping is wrong.
-    //     for id in [0, 9, MAX_REGISTERED_INTERFACES as u32, SERVER_ID_START - 1] {
-    //         let err = router.lookup_interface(id).unwrap_err();
-    //         assert!(
-    //             err.to_string().contains("unknown client object"),
-    //             "{id}: {err}"
-    //         );
-    //     }
-    // }
+        // An offer we destroyed can still have events in flight: not an error.
+        assert!(matches!(router.lookup_interface(offer), Ok(Route::Ignored)));
+        // Never registered, but inside the table: the same.
+        assert!(matches!(
+            router.lookup_interface(SERVER_ID_START + 5),
+            Ok(Route::Ignored)
+        ));
 
-    // #[test]
-    // fn a_freed_client_object_is_unknown_again() {
-    //     let mut router = WlMessageRouter::new();
-    //     let callback = router
-    //         .register_client(WlInterface::Callback)
-    //         .unwrap()
-    //         .commit();
-    //     assert!(router.lookup_interface(callback).unwrap().is_some());
-    //     router.free_client(callback);
-    //     assert!(router.lookup_interface(callback).is_err());
-    // }
+        // A client id that is free or reserved means our bookkeeping is wrong.
+        assert!(lookup_error(&router, 9).contains("Unknown client object"));
+        assert!(lookup_error(&router, 0).contains("reserved"));
+        // Outside the tables on either side.
+        for id in [
+            MAX_REGISTERED_INTERFACES as u32,
+            SERVER_ID_START - 1,
+            SERVER_ID_START + MAX_REGISTERED_INTERFACES as u32,
+            u32::MAX,
+        ] {
+            assert!(lookup_error(&router, id).contains("out of bounds"), "{id}");
+        }
+    }
+
+    #[test]
+    fn a_freed_client_object_is_unknown_again() {
+        let mut router = WlMessageRouter::new();
+        let callback = router
+            .register_client(WlInterface::Callback)
+            .unwrap()
+            .commit();
+        assert!(router.lookup_interface(callback).is_ok());
+        router.free_client(callback);
+        assert!(lookup_error(&router, callback).contains("Unknown client object"));
+    }
+
+    #[test]
+    fn a_destroyed_client_object_routes_as_destroyed_until_it_is_freed() {
+        let mut router = WlMessageRouter::new();
+        let source = router
+            .register_client(WlInterface::DataControlSource)
+            .unwrap()
+            .commit();
+        router.mark_destroyed_client(source).unwrap();
+        assert!(matches!(
+            router.lookup_interface(source),
+            Ok(Route::Destroyed(WlInterface::DataControlSource))
+        ));
+        // Not reusable yet: the compositor has not confirmed the delete.
+        assert_ne!(
+            router
+                .register_client(WlInterface::DataControlSource)
+                .unwrap()
+                .commit(),
+            source
+        );
+
+        router.free_client(source);
+        assert!(lookup_error(&router, source).contains("Unknown client object"));
+        assert_eq!(
+            router
+                .register_client(WlInterface::Callback)
+                .unwrap()
+                .commit(),
+            source
+        );
+    }
+
+    #[test]
+    fn only_a_live_client_object_can_be_marked_destroyed() {
+        let mut router = WlMessageRouter::new();
+        let source = router
+            .register_client(WlInterface::DataControlSource)
+            .unwrap()
+            .commit();
+        router.mark_destroyed_client(source).unwrap();
+        // Free, reserved, already destroyed, and outside the table.
+        for id in [9, 0, source, 99] {
+            assert!(router.mark_destroyed_client(id).is_err(), "{id}");
+        }
+    }
 
     #[test]
     fn server_ids_outside_the_table_are_rejected() {

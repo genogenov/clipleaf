@@ -150,3 +150,28 @@ macro_rules! log_debug {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_debug_arguments_are_not_evaluated_when_debug_is_off() {
+        let evaluated = std::cell::Cell::new(0);
+        let count = || {
+            evaluated.set(evaluated.get() + 1);
+            evaluated.get()
+        };
+        let default = DEBUG_ENABLED.load(atomic::Ordering::Relaxed);
+
+        DEBUG_ENABLED.store(false, atomic::Ordering::Relaxed);
+        crate::log_debug!("never formatted {}", count());
+        assert_eq!(evaluated.get(), 0);
+
+        DEBUG_ENABLED.store(true, atomic::Ordering::Relaxed);
+        crate::log_debug!("formatted {}", count());
+        assert_eq!(evaluated.get(), 1);
+
+        DEBUG_ENABLED.store(default, atomic::Ordering::Relaxed);
+    }
+}
