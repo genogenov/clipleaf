@@ -10,7 +10,8 @@ use std::{
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager, init_logging, log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager, init_logging,
+    log_debug, log_error,
 };
 
 use crate::{

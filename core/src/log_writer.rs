@@ -1,5 +1,10 @@
 use std::{
-    fmt, io::{self, IsTerminal, Write}, sync::{LazyLock, atomic::{self, AtomicBool}},
+    fmt,
+    io::{self, IsTerminal, Write},
+    sync::{
+        LazyLock,
+        atomic::{self, AtomicBool},
+    },
 };
 
 // Initialized on first use; color is decided once (honors NO_COLOR, see https://no-color.org).
@@ -74,7 +79,10 @@ pub struct LogWriter {
 static DEBUG_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 
 pub fn init_logging() {
-    match std::env::var_os("CLIPLEAF_LOG").as_deref().and_then(|v| v.to_str()) {
+    match std::env::var_os("CLIPLEAF_LOG")
+        .as_deref()
+        .and_then(|v| v.to_str())
+    {
         Some("debug") => DEBUG_ENABLED.store(true, atomic::Ordering::Relaxed),
         Some("off") => DEBUG_ENABLED.store(false, atomic::Ordering::Relaxed),
         _ => {}
