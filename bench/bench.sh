@@ -16,7 +16,7 @@ For stable numbers pin it to fast cores, e.g. `taskset -c 0-15 bench/bench.sh`.
   --compositor sway   a private headless sway (default; needs sway 1.11+)
   --compositor host   the running compositor. This overwrites the clipboard, and a
                       clipboard manager, if any, records every benchmark copy in its history
-  --runs N            runs per small case (default 100); 100 MiB cases use N/5, at least 5
+  --runs N            runs per case up to 1 MiB (default 100); 100 MiB cases use N/5, at least 5
 EOF
 }
 
@@ -91,9 +91,18 @@ trap 'exit 130' INT TERM
 
 if [[ $compositor == sway ]]; then start_sway; else start_host; fi
 
+# Payloads, by size. None ends in a newline, so `wl-paste -n` returns each one unchanged.
 words="hello from the clipleaf bench"
-printf '%s 1234567890' "$words" > "$W/small"
-head -c 100M /dev/urandom > "$W/big"
+printf '%s 1234567890' "$words" > "$W/40B"
+text_bytes() { head -c "$1" /dev/urandom | base64 -w 0 | head -c "$1"; }
+text_bytes 100 > "$W/100B"
+text_bytes 1024 > "$W/1KiB"
+text_bytes $((1024 * 1024)) > "$W/1MiB"
+{ head -c $((100 * 1024 * 1024 - 1)) /dev/urandom; printf x; } > "$W/100MiB"
+sizes=(40B 100B 1KiB 1MiB 100MiB)
+file_sizes=(100B 1KiB 1MiB 100MiB) # pastes to a file; 40 B is covered by /dev/null
+label() { sed -E 's/^([0-9]+)/\1 /' <<< "$1"; } # 1KiB -> "1 KiB"
+runs_for() { if [[ $1 == 100MiB ]]; then echo "$big_runs"; else echo "$runs"; fi; }
 
 # measure <id> <runs> <hyperfine options and command>: medians end up in $W/<id>.csv
 measure() {
@@ -146,27 +155,26 @@ echo "copy..." >&2
 text="'$words'"
 measure_copy copy-args clipleaf "$runs" --prepare "sleep 0.05" "'$C' $text"
 measure_copy copy-args wl "$runs" --prepare "sleep 0.05" "wl-copy $text"
-measure_copy copy-small clipleaf "$runs" --prepare "sleep 0.05" --input "$W/small" "'$C'"
-measure_copy copy-small wl "$runs" --prepare "sleep 0.05" --input "$W/small" "wl-copy -t text/plain"
-measure_copy copy-big clipleaf "$big_runs" --prepare "sleep 0.1" --input "$W/big" "'$C'"
-measure_copy copy-big wl "$big_runs" --prepare "sleep 0.1" --input "$W/big" "wl-copy -t text/plain"
+for size in "${sizes[@]}"; do
+  pause=0.05
+  [[ $size == 100MiB ]] && pause=0.1
+  measure_copy "copy-$size" clipleaf "$(runs_for "$size")" --prepare "sleep $pause" --input "$W/$size" "'$C'"
+  measure_copy "copy-$size" wl "$(runs_for "$size")" --prepare "sleep $pause" --input "$W/$size" "wl-copy -t text/plain"
+done
 
 echo "paste..." >&2
 for tool in clipleaf wl; do
   if [[ $tool == clipleaf ]]; then paste_cmd=("$P" -t text/plain); else paste_cmd=(wl-paste -n -t text/plain); fi
   quoted="'${paste_cmd[0]}' ${paste_cmd[*]:1}"
-  file=small
-  own "$tool" "$W/small"
-  check_paste "${paste_cmd[@]}"
-  measure "paste-small.$tool" "$runs" "$quoted"
-  peak_kb /dev/null "${paste_cmd[@]}" > "$W/paste-small.$tool.mem"
-  file=big
-  own "$tool" "$W/big"
-  check_paste "${paste_cmd[@]}"
-  measure "paste-big-null.$tool" "$big_runs" "$quoted"
-  peak_kb /dev/null "${paste_cmd[@]}" > "$W/paste-big-null.$tool.mem"
-  measure "paste-big-file.$tool" "$big_runs" --output "$W/out" "$quoted"
-  peak_kb "$W/out" "${paste_cmd[@]}" > "$W/paste-big-file.$tool.mem"
+  for file in "${sizes[@]}"; do
+    own "$tool" "$W/$file"
+    check_paste "${paste_cmd[@]}"
+    measure "paste-$file-null.$tool" "$(runs_for "$file")" "$quoted"
+    peak_kb /dev/null "${paste_cmd[@]}" > "$W/paste-$file-null.$tool.mem"
+    [[ " ${file_sizes[*]} " == *" $file "* ]] || continue
+    measure "paste-$file-file.$tool" "$(runs_for "$file")" --output "$W/out" "$quoted"
+    peak_kb "$W/out" "${paste_cmd[@]}" > "$W/paste-$file-file.$tool.mem"
+  done
 done
 
 case $compositor in
@@ -185,11 +193,15 @@ echo
 echo "| | clipleaf time | wl-clipboard time | clipleaf memory | wl-clipboard memory |"
 echo "| --- | ---: | ---: | ---: | ---: |"
 row "Copy a ${#words} B text argument" copy-args 'clipleaf-copy <text>' 'wl-copy <text>'
-row 'Copy 40 B from stdin' copy-small clipleaf-copy 'wl-copy -t text/plain'
-row 'Copy 100 MiB from stdin' copy-big clipleaf-copy 'wl-copy -t text/plain'
-row 'Paste 40 B to `/dev/null`' paste-small 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
-row 'Paste 100 MiB to `/dev/null`' paste-big-null 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
-row 'Paste 100 MiB to a file' paste-big-file 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
+for size in "${sizes[@]}"; do
+  row "Copy $(label "$size") from stdin" "copy-$size" clipleaf-copy 'wl-copy -t text/plain'
+done
+for size in "${sizes[@]}"; do
+  row "Paste $(label "$size") to \`/dev/null\`" "paste-$size-null" 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
+done
+for size in "${file_sizes[@]}"; do
+  row "Paste $(label "$size") to a file" "paste-$size-file" 'clipleaf-paste -t text/plain' 'wl-paste -n -t text/plain'
+done
 echo
 echo "Median of $runs runs ($big_runs for 100 MiB) with $(hyperfine --version), $where, $(wl-copy --version | head -1), $cpu, Linux $(uname -r)."
 echo "Memory is resident memory: for copies, of the background process that keeps the copy available; for pastes, the median peak of 5 runs (for wl-paste, the larger of wl-paste and the cat it runs)."
