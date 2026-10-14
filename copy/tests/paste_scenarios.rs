@@ -24,8 +24,10 @@ const COPY: &str = env!("CARGO_BIN_EXE_clipleaf-copy");
 fn paster(comp: &TestCompositor) -> WlSessionManager {
     let stream = WlBufferedStream::connect(&comp.socket_path()).unwrap();
     let mut session = WlSessionManager::initialize(stream).unwrap();
-    session.sync().unwrap();
-    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone) {}
+    let callback_id = session.sync().unwrap();
+    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
+    {
+    }
     session
 }
 
@@ -55,8 +57,10 @@ fn take_over(comp: &TestCompositor, primary: bool) -> WlSessionManager {
     } else {
         session.set_selection(source.local_id).unwrap();
     }
-    session.sync().unwrap();
-    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone) {}
+    let callback_id = session.sync().unwrap();
+    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
+    {
+    }
     session
 }
 

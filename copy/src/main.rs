@@ -86,7 +86,7 @@ fn run() -> io::Result<()> {
         mgr.set_selection(data_source.local_id)?;
     }
 
-    mgr.sync()?;
+    let callback_id = mgr.sync()?;
 
     let mut detached = args.foreground;
 
@@ -104,7 +104,9 @@ fn run() -> io::Result<()> {
                 log_debug!("Received cancelled event. Exiting...");
                 return Ok(());
             }
-            WlSessionEvent::SyncDone if !detached => {
+            WlSessionEvent::SyncDone {
+                callback_id: sync_callback_id,
+            } if sync_callback_id == callback_id && !detached => {
                 log_debug!("Received SyncDone - detaching from terminal");
                 detached = true;
                 match process_util::fork_process() {

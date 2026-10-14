@@ -111,7 +111,7 @@ fn events_are_delivered_one_at_a_time_in_order() {
     );
     drop(fd);
     let mut after_send = source_cancelled(source);
-    after_send.extend(done());
+    after_send.extend(done(CALLBACK));
     rig.peer().send(&after_send);
 
     // Everything is already readable, yet each call handles only up to its own event.
@@ -146,7 +146,7 @@ fn events_are_delivered_one_at_a_time_in_order() {
     ));
     assert!(matches!(
         rig.session.next_event().unwrap(),
-        WlSessionEvent::SyncDone
+        WlSessionEvent::SyncDone { callback_id } if callback_id == CALLBACK
     ));
     assert!(rig.session.try_next_event().unwrap().is_none());
 }
@@ -443,14 +443,15 @@ fn a_burst_right_after_bind_is_routed_per_offer_and_tracks_both_selections() {
     burst.extend(selection(OFFER_A));
     burst.extend(new_offer(OFFER_B, "text/plain"));
     burst.extend(primary_selection(OFFER_B));
-    burst.extend(done());
+    burst.extend(done(CALLBACK));
     rig.peer().send(&burst);
     rig.peer().shutdown_write();
 
     let mut events = Vec::new();
     loop {
         let event = rig.session.next_event().unwrap();
-        let finished = matches!(event, WlSessionEvent::SyncDone);
+        let finished =
+            matches!(event, WlSessionEvent::SyncDone { callback_id } if callback_id == CALLBACK);
         events.push(event);
         if finished {
             break;
@@ -461,7 +462,7 @@ fn a_burst_right_after_bind_is_routed_per_offer_and_tracks_both_selections() {
         [
             ("selection", Some(OFFER_A)),
             ("primary", Some(OFFER_B)),
-            ("sync", None)
+            ("sync", Some(CALLBACK))
         ]
     );
 

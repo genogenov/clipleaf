@@ -56,9 +56,11 @@ fn init() -> io::Result<WlSessionManager> {
     let mut mgr = WlSessionManager::initialize(stream)?;
 
     log_debug!("Starting Paste loop");
-    mgr.sync()?;
+    let callback_id = mgr.sync()?;
 
-    while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone) {}
+    while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
+    {
+    }
     Ok(mgr)
 }
 

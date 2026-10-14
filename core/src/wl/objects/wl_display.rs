@@ -5,22 +5,10 @@ use crate::wl::{
     wl_message_writer::WlMessageWriter,
 };
 
-pub struct WlDisplay {
-    callback_id: u32,
-}
-
-impl Default for WlDisplay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub struct WlDisplay;
 
 impl WlDisplay {
     pub const TYPE_ID: u32 = 1;
-
-    pub fn new() -> Self {
-        Self { callback_id: 0 }
-    }
 
     pub fn parse_message(opcode: u16, buffer: &[u8]) -> Option<DisplayEvent> {
         match opcode {
@@ -50,7 +38,6 @@ impl WlDisplay {
     }
 
     pub fn get_registry(
-        &mut self,
         writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<WlRegistry> {
@@ -64,16 +51,14 @@ impl WlDisplay {
     }
 
     pub fn schedule_sync(
-        &mut self,
         writer: WlMessageWriter,
         router: &mut WlMessageRouter,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<u32> {
         let mut msg = writer.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID)?;
         let callback_id = router.register_client(WlInterface::Callback)?;
         msg.pack_new_object_id(&callback_id)?;
         msg.end()?;
-        self.callback_id = callback_id.commit();
-        Ok(())
+        Ok(callback_id.commit())
     }
 }
 

@@ -17,8 +17,10 @@ fn session(comp: &TestCompositor) -> WlSessionManager {
 }
 
 fn until_sync(s: &mut WlSessionManager) {
-    s.sync().unwrap();
-    while !matches!(s.next_event().unwrap(), WlSessionEvent::SyncDone) {}
+    let callback_id = s.sync().unwrap();
+    while !matches!(s.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id)
+    {
+    }
 }
 
 /// An owner that offers `mimes` as the clipboard (or primary) and has synced.
@@ -71,11 +73,12 @@ fn an_owner_serves_a_paster_through_the_relay() {
 /// Syncs and returns the events up to and including the sync's `done`. The relay answers a
 /// client's requests in order, so anything it queued for this client earlier is among them.
 fn events_until_sync(s: &mut WlSessionManager) -> Vec<WlSessionEvent> {
-    s.sync().unwrap();
+    let callback_id = s.sync().unwrap();
     let mut events = Vec::new();
     loop {
         let event = s.next_event().unwrap();
-        let done = matches!(event, WlSessionEvent::SyncDone);
+        let done =
+            matches!(event, WlSessionEvent::SyncDone { callback_id: id } if id == callback_id);
         events.push(event);
         if done {
             return events;
@@ -264,9 +267,11 @@ fn a_receive_on_an_offer_the_device_no_longer_holds_is_not_forwarded() {
     // The relay handled the receive before it answers this sync. Check the notes before reading
     // the payload, so a regression fails here instead of waiting for a `send` nobody serves.
     // (The paster ignores the news that came meanwhile; only the old offer matters here.)
-    paster.sync().unwrap();
+    let callback_id = paster.sync().unwrap();
     comp.wait_for(|n| matches!(n, Note::Selection { mimes: Some(_), .. }));
-    while !matches!(paster.next_event().unwrap(), WlSessionEvent::SyncDone) {}
+    while !matches!(paster.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id)
+    {
+    }
     assert!(
         !comp
             .notes

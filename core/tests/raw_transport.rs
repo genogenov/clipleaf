@@ -101,7 +101,7 @@ fn a_partial_message_at_the_very_end_of_a_full_buffer_waits_for_the_rest() {
 fn messages_already_buffered_are_handled_by_the_next_call() {
     let mut rig = rig();
     // `done` and `delete_id` arrive in the same read.
-    let mut events = done();
+    let mut events = done(CALLBACK);
     events.extend(wire::msg(
         DISPLAY,
         DISPLAY_DELETE_ID,
@@ -111,7 +111,7 @@ fn messages_already_buffered_are_handled_by_the_next_call() {
 
     assert!(matches!(
         rig.session.next_event().unwrap(),
-        WlSessionEvent::SyncDone
+        WlSessionEvent::SyncDone { callback_id } if callback_id == CALLBACK
     ));
     // The socket has nothing left, but the delete_id is in the buffer and must still count:
     // the callback's id is free again.

@@ -105,8 +105,8 @@ pub fn source_cancelled(source: u32) -> Vec<u8> {
     wire::msg(source, SOURCE_CANCELLED, &[])
 }
 
-pub fn done() -> Vec<u8> {
-    raw::callback_done(CALLBACK)
+pub fn done(id: u32) -> Vec<u8> {
+    raw::callback_done(id)
 }
 
 /// Every event the session has ready right now, via `try_next_event`.
@@ -127,7 +127,7 @@ pub fn kinds(events: &[WlSessionEvent]) -> Vec<(&'static str, Option<u32>)> {
             WlSessionEvent::PrimarySelection { offer_id } => ("primary", *offer_id),
             WlSessionEvent::DataControlSend { source, .. } => ("send", Some(*source)),
             WlSessionEvent::DataControlCancelled { source } => ("cancelled", Some(*source)),
-            WlSessionEvent::SyncDone => ("sync", None),
+            WlSessionEvent::SyncDone { callback_id } => ("sync", Some(*callback_id)),
         })
         .collect()
 }

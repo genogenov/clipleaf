@@ -37,11 +37,12 @@ pub enum WlSessionEvent {
     DataControlCancelled {
         source: u32,
     },
-    SyncDone,
+    SyncDone {
+        callback_id: u32,
+    },
 }
 
 pub struct WlSessionManager {
-    display: WlDisplay,
     stream: WlBufferedStream,
     registry: WlRegistry,
     router: WlMessageRouter,
@@ -52,11 +53,10 @@ pub struct WlSessionManager {
 
 impl WlSessionManager {
     pub fn initialize(mut stream: WlBufferedStream) -> Result<WlSessionManager, std::io::Error> {
-        let mut display = WlDisplay::new();
         let mut router = WlMessageRouter::new();
-        let mut registry = display.get_registry(stream.get_writer(), &mut router)?;
+        let mut registry = WlDisplay::get_registry(stream.get_writer(), &mut router)?;
         let mut offer_tracker = WlOfferTracker::new();
-        display.schedule_sync(stream.get_writer(), &mut router)?;
+        let callback = WlDisplay::schedule_sync(stream.get_writer(), &mut router)?;
         stream.write()?;
         while !matches!(
             Self::read_event(
@@ -66,7 +66,7 @@ impl WlSessionManager {
                 &mut offer_tracker,
                 ReadMode::Block
             )?,
-            WlSessionEvent::SyncDone
+            WlSessionEvent::SyncDone { callback_id } if callback_id == callback
         ) {}
 
         log_debug!("Got registry: {:?}", registry);
@@ -100,7 +100,6 @@ impl WlSessionManager {
             );
 
             Ok(WlSessionManager {
-                display,
                 stream,
                 router,
                 offer_tracker,
@@ -130,10 +129,10 @@ impl WlSessionManager {
             .set_primary_selection(self.stream.get_writer(), source_id)
     }
 
-    pub fn sync(&mut self) -> Result<(), std::io::Error> {
-        self.display
-            .schedule_sync(self.stream.get_writer(), &mut self.router)?;
-        self.stream.write()
+    pub fn sync(&mut self) -> Result<u32, std::io::Error> {
+        let callback_id = WlDisplay::schedule_sync(self.stream.get_writer(), &mut self.router)?;
+        self.stream.write()?;
+        Ok(callback_id)
     }
 
     pub fn next_event(&mut self) -> io::Result<WlSessionEvent> {
@@ -197,7 +196,9 @@ impl WlSessionManager {
             WlInterface::Callback => {
                 if header.opcode == WlCallbackEvents::Done as u16 {
                     log_debug!("Received done event from callback");
-                    return Ok(Some(WlSessionEvent::SyncDone));
+                    return Ok(Some(WlSessionEvent::SyncDone {
+                        callback_id: header.object_id,
+                    }));
                 }
                 Err(Error::other("Unknown opcode"))
             }
