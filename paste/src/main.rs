@@ -12,14 +12,13 @@ use std::{
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager,
-    ffi::{F_SETPIPE_SZ, fcntl},
-    log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager, ffi::{F_SETPIPE_SZ, fcntl}, init_logging, log_debug, log_error,
 };
 
 use crate::args::{Command, PasteArgs};
 
 fn main() -> ExitCode {
+    init_logging();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

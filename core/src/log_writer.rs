@@ -1,7 +1,5 @@
 use std::{
-    fmt,
-    io::{self, IsTerminal, Write},
-    sync::LazyLock,
+    fmt, io::{self, IsTerminal, Write}, sync::{LazyLock, atomic::{self, AtomicBool}},
 };
 
 // Initialized on first use; color is decided once (honors NO_COLOR, see https://no-color.org).
@@ -73,6 +71,22 @@ pub struct LogWriter {
     debug_prefix: &'static str,
 }
 
+static DEBUG_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+
+pub fn init_logging() {
+    match std::env::var_os("CLIPLEAF_LOG").as_deref().and_then(|v| v.to_str()) {
+        Some("debug") => DEBUG_ENABLED.store(true, atomic::Ordering::Relaxed),
+        Some("off") => DEBUG_ENABLED.store(false, atomic::Ordering::Relaxed),
+        _ => {}
+    }
+}
+
+#[doc(hidden)]
+#[inline(always)]
+pub fn debug_enabled() -> bool {
+    DEBUG_ENABLED.load(atomic::Ordering::Relaxed)
+}
+
 impl LogWriter {
     fn new() -> Self {
         let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
@@ -94,6 +108,8 @@ impl LogWriter {
         Self::write_line(self.error_prefix, args);
     }
 
+    #[cold]
+    #[inline(never)]
     pub fn debug(&self, args: fmt::Arguments<'_>) {
         Self::write_line(self.debug_prefix, args);
     }
@@ -121,8 +137,7 @@ macro_rules! log_error {
 #[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => {
-        #[cfg(debug_assertions)]
-        {
+        if $crate::debug_enabled() {
             $crate::LOGGER.debug(format_args!($($arg)*));
         }
     };

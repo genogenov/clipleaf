@@ -104,8 +104,8 @@ impl WlDataControlOffer {
 
         let parsed_mime = match parse_mime(mime) {
             Ok(m) => m,
-            Err(_e) => {
-                log_debug!("Failed to parse mime, skipping: '{}'", _e);
+            Err(e) => {
+                log_debug!("Failed to parse mime, skipping: '{}'", e);
                 return;
             }
         };

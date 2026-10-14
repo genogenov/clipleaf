@@ -25,5 +25,5 @@ pub use wl::{
 };
 
 pub use fd_io::{serve_bytes, serve_file};
-pub use log_writer::{Colors, LOGGER};
+pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
 pub use mime::parse_mime;
