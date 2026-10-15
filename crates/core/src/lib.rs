@@ -4,6 +4,7 @@ pub mod ffi;
 #[doc(hidden)]
 mod log_writer;
 mod mime;
+mod poll;
 mod unix_fd_stream;
 mod wl;
 
@@ -27,3 +28,4 @@ pub use wl::{
 pub use fd_io::{serve_bytes, serve_file};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
 pub use mime::parse_mime;
+pub use poll::{PollFd, PollResult, poll};

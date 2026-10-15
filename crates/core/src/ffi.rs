@@ -1,28 +1,28 @@
 use std::os::fd::RawFd;
 
 unsafe extern "C" {
-    // Forks the current process, returning -1 on error, 0 in the child, and the child's PID in the parent. Link to doc: https://man7.org/linux/man-pages/man2/fork.2.html
+    /// Forks the current process, returning -1 on error, 0 in the child, and the child's PID in the parent. Link to doc: https://man7.org/linux/man-pages/man2/fork.2.html
     pub fn fork() -> i32;
 
-    // Creates a new session and sets the process group ID. Link to doc: https://man7.org/linux/man-pages/man2/setsid.2.html
+    /// Creates a new session and sets the process group ID. Link to doc: https://man7.org/linux/man-pages/man2/setsid.2.html
     pub fn setsid() -> i32;
 
-    // Duplicates a file descriptor to a given new file descriptor number. Link to doc: https://man7.org/linux/man-pages/man2/dup2.2.html
+    /// Duplicates a file descriptor to a given new file descriptor number. Link to doc: https://man7.org/linux/man-pages/man2/dup2.2.html
     pub fn dup2(old: i32, new: i32) -> i32;
 
-    // Sets a signal handler for the given signal number. Link to doc: https://man7.org/linux/man-pages/man2/signal.2.html
+    /// Sets a signal handler for the given signal number. Link to doc: https://man7.org/linux/man-pages/man2/signal.2.html
     pub fn signal(signum: i32, handler: usize) -> usize;
 
-    // Receives a message from a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/recvmsg.2.html
+    /// Receives a message from a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/recvmsg.2.html
     pub fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
 
-    // Sends a message on a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/sendmsg.2.html
+    /// Sends a message on a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/sendmsg.2.html
     pub fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
 
-    // Performs operations on a file descriptor. Link to doc: https://man7.org/linux/man-pages/man2/fcntl.2.html
+    /// Performs operations on a file descriptor. Link to doc: https://man7.org/linux/man-pages/man2/fcntl.2.html
     pub fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 
-    // Moves data between two file descriptors without copying between kernel and user space. Link to doc: https://man7.org/linux/man-pages/man2/splice.2.html
+    /// Moves data between two file descriptors without copying between kernel and user space. Link to doc: https://man7.org/linux/man-pages/man2/splice.2.html
     pub fn splice(
         fd_in: RawFd,
         off_in: *mut i64,
@@ -31,6 +31,9 @@ unsafe extern "C" {
         len: usize,
         flags: u32,
     ) -> isize;
+
+    /// Waits for events on a set of file descriptors. Link to doc: https://man7.org/linux/man-pages/man2/poll.2.html
+    pub fn poll(fds: *mut pollfd, nfds: std::ffi::c_ulong, timeout: i32) -> i32;
 }
 
 pub const F_GETPIPE_SZ: i32 = 1032;
@@ -113,6 +116,13 @@ pub const O_NONBLOCK: i32 = 1 << 11;
 )))]
 pub const SOL_SOCKET: i32 = 1;
 
+pub const POLLIN: i16 = 0x1;
+pub const POLLOUT: i16 = 0x4;
+pub const POLLERR: i16 = 0x8;
+
+pub const POLLHUP: i16 = 0x10;
+pub const POLLNVAL: i16 = 0x20;
+
 #[cfg(any(
     target_arch = "mips",
     target_arch = "mips32r6",
@@ -155,4 +165,11 @@ pub const fn cmsg_align(len: usize) -> usize {
 
 pub const fn cmsg_space(len: usize) -> usize {
     cmsg_align(std::mem::size_of::<cmsghdr>()) + cmsg_align(len)
+}
+
+#[repr(C)]
+pub struct pollfd {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
 }
