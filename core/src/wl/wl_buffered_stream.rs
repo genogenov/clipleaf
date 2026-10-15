@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::OsString,
     io::{self, ErrorKind},
+    os::fd::AsFd,
     path::{Path, PathBuf},
 };
 
@@ -59,6 +60,12 @@ fn socket_path(
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
 
     Ok(Path::new(&runtime_dir).join(display))
+}
+
+impl AsFd for WlBufferedStream {
+    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
+        self.socket.as_fd()
+    }
 }
 
 impl WlBufferedStream {

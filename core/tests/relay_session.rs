@@ -62,6 +62,7 @@ fn an_owner_serves_a_paster_through_the_relay() {
     let (mut reader, writer) = fds::channel();
     let asked = paster.receive_offer(false, &None, writer).unwrap();
     assert_eq!(asked.map(|m| m.as_ref()), Some("text/plain"));
+    paster.send_messages().unwrap();
 
     let (mime, fd) = next_send(&mut owner);
     assert_eq!(mime, b"text/plain");

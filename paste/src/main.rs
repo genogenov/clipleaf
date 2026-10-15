@@ -120,13 +120,17 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
 
     let stdout = io::stdout();
     let is_terminal = stdout.is_terminal();
+    let add_newline = !args.no_newline && is_terminal && is_text_mime(preferred_mime);
+
+    mgr.send_messages()?;
+
     let mut out_guard = stdout.lock();
     match io::copy(&mut reader, &mut out_guard) {
         Err(e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
         other => other.map(drop),
     }?;
 
-    if !args.no_newline && is_terminal && is_text_mime(preferred_mime) {
+    if add_newline {
         writeln!(out_guard)?;
     }
 

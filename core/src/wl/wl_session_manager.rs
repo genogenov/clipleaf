@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     io::{self, Error, ErrorKind},
-    os::fd::OwnedFd,
+    os::fd::{AsFd, OwnedFd},
 };
 
 use crate::{
@@ -49,6 +49,12 @@ pub struct WlSessionManager {
     offer_tracker: WlOfferTracker,
     local_data_device: WlDataControlDevice,
     ext_data_control_manager: BoundInterface<ExtDataControlManagerV1>,
+}
+
+impl AsFd for WlSessionManager {
+    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
+        self.stream.as_fd()
+    }
 }
 
 impl WlSessionManager {
@@ -145,6 +151,10 @@ impl WlSessionManager {
         )
     }
 
+    /// Returns the next event, or `Ok(None)` once no complete event is buffered
+    /// and the socket has nothing more to read. One read can buffer several
+    /// events, and buffered events don't make the socket readable: a caller that
+    /// waits for readiness on `as_fd()` must call this until `Ok(None)` first.
     pub fn try_next_event(&mut self) -> io::Result<Option<WlSessionEvent>> {
         match Self::read_event(
             &mut self.stream,
@@ -162,7 +172,7 @@ impl WlSessionManager {
     pub fn destroy_source(&mut self, source: WlDataControlSource) -> std::io::Result<()> {
         let local_id = source.local_id;
         source.destroy(self.stream.get_writer())?;
-        self.router.mark_destroyed_client(local_id)?;
+        self.router.mark_destroyed(local_id)?;
         Ok(())
     }
 
@@ -192,17 +202,14 @@ impl WlSessionManager {
                     )?);
                     None
                 }
+                Route::Destroyed(WlInterface::DataControlOffer) => {
+                    WlDataControlOffer::parse_message(msg.0.opcode, msg.1, msg.2)?;
+                    None
+                }
                 Route::Destroyed(other) => {
                     return Err(io::Error::other(format!(
                         "destroyed {other:?} not supported"
                     )));
-                }
-                Route::Ignored => {
-                    log_debug!(
-                        "Received message for ignored object_id: {:?}",
-                        msg.0.object_id
-                    );
-                    continue;
                 }
                 Route::Live(interface) => {
                     Self::handle_event(router, registry, tracker, &mut writer, interface, msg)?
@@ -331,7 +338,7 @@ impl WlSessionManager {
     ) -> std::io::Result<()> {
         WlDataControlOffer::destroy(id, writer.get_writer())?;
         tracker.remove(id);
-        router.free_server(id)
+        router.mark_destroyed(id)
     }
 
     pub fn get_message_writer(&mut self) -> WlMessageWriter<'_> {
@@ -370,7 +377,6 @@ impl WlSessionManager {
         };
 
         WlDataControlOffer::receive(offer.id(), self.stream.get_writer(), preferred_mime, fd)?;
-        self.stream.write()?;
         Ok(Some(preferred_mime))
     }
 

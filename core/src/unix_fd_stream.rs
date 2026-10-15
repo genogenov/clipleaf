@@ -1,6 +1,6 @@
 use std::{
     os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+        fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::Path,
@@ -27,6 +27,12 @@ struct AlignedCmsghdr {
 
 pub struct UnixFdStream {
     stream_fd: OwnedFd,
+}
+
+impl AsFd for UnixFdStream {
+    fn as_fd(&self) -> std::os::unix::prelude::BorrowedFd<'_> {
+        self.stream_fd.as_fd()
+    }
 }
 
 impl From<UnixStream> for UnixFdStream {

@@ -498,6 +498,7 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
         .map(|m| m.to_string());
     assert_eq!(asked.as_deref(), Some("text/plain;charset=utf-8"));
 
+    rig.session.send_messages().unwrap();
     let mut batches = rig.peer().recv_batches();
     assert_eq!(batches.iter().map(|b| b.fds.len()).sum::<usize>(), 1);
     let fd = batches.iter_mut().find_map(|b| b.fds.pop()).unwrap();

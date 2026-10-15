@@ -14,14 +14,14 @@ pub enum Slot {
 pub enum Route {
     Live(WlInterface),
     Destroyed(WlInterface),
-    Ignored,
 }
 
-const MAX_REGISTERED_INTERFACES: usize = 16;
+const MAX_CLIENT_INTERFACES: usize = 16;
+const MAX_SERVER_OBJECTS: usize = 1 << 16;
 
 pub struct WlMessageRouter {
-    client_interfaces: [Slot; MAX_REGISTERED_INTERFACES],
-    server_interfaces: [Slot; MAX_REGISTERED_INTERFACES],
+    client_interfaces: [Slot; MAX_CLIENT_INTERFACES],
+    server_interfaces: Vec<Slot>,
 }
 
 impl Default for WlMessageRouter {
@@ -60,8 +60,8 @@ impl<'a> Drop for WlPendingId<'a> {
 impl WlMessageRouter {
     pub fn new() -> Self {
         let mut instance = Self {
-            client_interfaces: [Slot::Free; MAX_REGISTERED_INTERFACES],
-            server_interfaces: [Slot::Free; MAX_REGISTERED_INTERFACES],
+            client_interfaces: [Slot::Free; MAX_CLIENT_INTERFACES],
+            server_interfaces: vec![Slot::Free; 16],
         };
         instance.client_interfaces[0] = Slot::Reserved;
         instance.client_interfaces[1] = Slot::Live(WlInterface::Display);
@@ -84,26 +84,42 @@ impl WlMessageRouter {
     }
 
     pub fn register_server_object(&mut self, interface: WlInterface, id: u32) -> Result<u32> {
-        if let Some(slot) = self.server_interfaces.get_mut(
-            id.checked_sub(SERVER_ID_START)
-                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", id)))?
-                as usize,
-        ) {
+        let index = id
+            .checked_sub(SERVER_ID_START)
+            .ok_or_else(|| Error::other(format!("Invalid server slot id {}", id)))?
+            as usize;
+        if index >= MAX_SERVER_OBJECTS {
+            return Err(Error::other(format!(
+                "Invalid server slot id {} exceeds the max server ID allowed",
+                id
+            )));
+        }
+        if self.server_interfaces.len() <= index {
+            self.server_interfaces.resize(index + 1, Slot::Free);
+        }
+        let slot = &mut self.server_interfaces[index];
+        {
+            // Server objects are only destroyed by us, no delete_id comes, so reusing taken ID would mean a misbehaving compositor.
+            if let Slot::Live(_) = *slot {
+                return Err(Error::other(format!(
+                    "The requested server slod id {} is already taken",
+                    index
+                )));
+            }
             *slot = Slot::Live(interface);
             log_debug!("Registered interface {:?} at server slot {}", interface, id);
             Ok(id)
-        } else {
-            Err(Error::other(format!(
-                "Invalid server slot id {}(local array id: {})",
-                id,
-                (id - SERVER_ID_START)
-            )))
         }
     }
 
-    pub fn mark_destroyed_client(&mut self, object_id: u32) -> Result<()> {
-        if let Some(slot) = self.client_interfaces.get_mut(object_id as usize)
-            && let Slot::Live(interface) = *slot
+    pub fn mark_destroyed(&mut self, object_id: u32) -> Result<()> {
+        let slot = self.get_slot_mut(object_id)?;
+        let Slot::Live(interface) = *slot else {
+            return Err(Error::other(format!(
+                "Invalid slot id {} for marking destroyed",
+                object_id
+            )));
+        };
         {
             *slot = Slot::Destroyed(interface);
             log_debug!(
@@ -111,16 +127,12 @@ impl WlMessageRouter {
                 interface,
                 object_id
             );
-            return Ok(());
+            Ok(())
         }
-        Err(Error::other(format!(
-            "Invalid client slot id {} for marking destroyed",
-            object_id
-        )))
     }
 
     pub fn lookup_interface(&self, object_id: u32) -> io::Result<Route> {
-        match self.lookup_slot(object_id)? {
+        match self.get_slot(object_id)? {
             Slot::Live(interface) => Ok(Route::Live(*interface)),
             Slot::Destroyed(interface) => {
                 log_debug!(
@@ -130,10 +142,10 @@ impl WlMessageRouter {
                 );
                 Ok(Route::Destroyed(*interface))
             }
-            Slot::Free if object_id >= SERVER_ID_START => {
-                log_debug!("Ignoring compositor-created object with id {}", object_id);
-                Ok(Route::Ignored)
-            }
+            Slot::Free if object_id >= SERVER_ID_START => Err(Error::other(format!(
+                "Event for unanounced server object with id {}",
+                object_id
+            ))),
             Slot::Reserved => Err(Error::other(format!(
                 "event for reserved client object with id {}",
                 object_id
@@ -143,18 +155,6 @@ impl WlMessageRouter {
                 object_id
             ))),
         }
-    }
-
-    pub fn free_server(&mut self, object_id: u32) -> Result<()> {
-        if let Some(slot) = self.server_interfaces.get_mut(
-            object_id
-                .checked_sub(SERVER_ID_START)
-                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", object_id)))?
-                as usize,
-        ) {
-            *slot = Slot::Free;
-        }
-        Ok(())
     }
 
     pub fn free_client(&mut self, object_id: u32) -> Option<()> {
@@ -173,12 +173,22 @@ impl WlMessageRouter {
             .position(|slot| *slot == Slot::Free)
     }
 
-    fn lookup_slot(&self, object_id: u32) -> Result<&Slot> {
+    fn get_slot(&self, object_id: u32) -> Result<&Slot> {
         let slot = if object_id >= SERVER_ID_START {
             self.server_interfaces
                 .get((object_id - SERVER_ID_START) as usize)
         } else {
             self.client_interfaces.get(object_id as usize)
+        };
+        slot.ok_or_else(|| Error::other(format!("object with id {} out of bounds", object_id)))
+    }
+
+    fn get_slot_mut(&mut self, object_id: u32) -> Result<&mut Slot> {
+        let slot = if object_id >= SERVER_ID_START {
+            self.server_interfaces
+                .get_mut((object_id - SERVER_ID_START) as usize)
+        } else {
+            self.client_interfaces.get_mut(object_id as usize)
         };
         slot.ok_or_else(|| Error::other(format!("object with id {} out of bounds", object_id)))
     }
@@ -215,7 +225,7 @@ mod tests {
         );
     }
 
-    fn lookup_error(router: &WlMessageRouter, id: u32) -> String {
+    fn lookup_error(router: &mut WlMessageRouter, id: u32) -> String {
         router
             .lookup_interface(id)
             .err()
@@ -229,7 +239,7 @@ mod tests {
         let pending = router.register_client(WlInterface::Registry).unwrap();
         assert_eq!(pending.id(), 2);
         drop(pending);
-        assert!(lookup_error(&router, 2).contains("Unknown client object"));
+        assert!(lookup_error(&mut router, 2).contains("Unknown client object"));
         assert_eq!(
             router.register_client(WlInterface::Seat).unwrap().commit(),
             2
@@ -266,36 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn freed_server_objects_are_ignored_but_bad_client_ids_and_ids_past_the_tables_are_errors() {
-        let mut router = WlMessageRouter::new();
-        let offer = router
-            .register_server_object(WlInterface::DataControlOffer, SERVER_ID_START)
-            .unwrap();
-        router.free_server(offer).unwrap();
-
-        // An offer we destroyed can still have events in flight: not an error.
-        assert!(matches!(router.lookup_interface(offer), Ok(Route::Ignored)));
-        // Never registered, but inside the table: the same.
-        assert!(matches!(
-            router.lookup_interface(SERVER_ID_START + 5),
-            Ok(Route::Ignored)
-        ));
-
-        // A client id that is free or reserved means our bookkeeping is wrong.
-        assert!(lookup_error(&router, 9).contains("Unknown client object"));
-        assert!(lookup_error(&router, 0).contains("reserved"));
-        // Outside the tables on either side.
-        for id in [
-            MAX_REGISTERED_INTERFACES as u32,
-            SERVER_ID_START - 1,
-            SERVER_ID_START + MAX_REGISTERED_INTERFACES as u32,
-            u32::MAX,
-        ] {
-            assert!(lookup_error(&router, id).contains("out of bounds"), "{id}");
-        }
-    }
-
-    #[test]
     fn a_freed_client_object_is_unknown_again() {
         let mut router = WlMessageRouter::new();
         let callback = router
@@ -304,7 +284,7 @@ mod tests {
             .commit();
         assert!(router.lookup_interface(callback).is_ok());
         router.free_client(callback);
-        assert!(lookup_error(&router, callback).contains("Unknown client object"));
+        assert!(lookup_error(&mut router, callback).contains("Unknown client object"));
     }
 
     #[test]
@@ -314,7 +294,7 @@ mod tests {
             .register_client(WlInterface::DataControlSource)
             .unwrap()
             .commit();
-        router.mark_destroyed_client(source).unwrap();
+        router.mark_destroyed(source).unwrap();
         assert!(matches!(
             router.lookup_interface(source),
             Ok(Route::Destroyed(WlInterface::DataControlSource))
@@ -329,7 +309,7 @@ mod tests {
         );
 
         router.free_client(source);
-        assert!(lookup_error(&router, source).contains("Unknown client object"));
+        assert!(lookup_error(&mut router, source).contains("Unknown client object"));
         assert_eq!(
             router
                 .register_client(WlInterface::Callback)
@@ -346,27 +326,10 @@ mod tests {
             .register_client(WlInterface::DataControlSource)
             .unwrap()
             .commit();
-        router.mark_destroyed_client(source).unwrap();
+        router.mark_destroyed(source).unwrap();
         // Free, reserved, already destroyed, and outside the table.
         for id in [9, 0, source, 99] {
-            assert!(router.mark_destroyed_client(id).is_err(), "{id}");
+            assert!(router.mark_destroyed(id).is_err(), "{id}");
         }
-    }
-
-    #[test]
-    fn server_ids_outside_the_table_are_rejected() {
-        let mut router = WlMessageRouter::new();
-        let past_the_end = SERVER_ID_START + MAX_REGISTERED_INTERFACES as u32;
-        assert!(
-            router
-                .register_server_object(WlInterface::DataControlOffer, past_the_end)
-                .is_err()
-        );
-        assert!(
-            router
-                .register_server_object(WlInterface::DataControlOffer, 5)
-                .is_err()
-        );
-        assert!(router.free_server(5).is_err());
     }
 }

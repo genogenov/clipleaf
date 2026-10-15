@@ -40,6 +40,7 @@ fn pasted(comp: &TestCompositor, primary: bool, mime: Option<&str>) -> Vec<u8> {
         .receive_offer(primary, &asked, writer)
         .unwrap()
         .expect("type offered");
+    session.send_messages().unwrap();
     // Blocking: the relay dups the fd it forwards, so EOF can be microseconds late.
     fds::read_to_eof(&mut reader)
 }
