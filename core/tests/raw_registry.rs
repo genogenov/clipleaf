@@ -33,7 +33,7 @@ fn initialize_with(events: &[Vec<u8>]) -> std::io::Result<(u32, u32)> {
     // Nothing else is coming: an initialize that misses its `done` fails on EOF instead of waiting.
     peer.shutdown_write();
     let mut session = WlSessionManager::initialize(stream)?;
-    session.send_messages()?;
+    session.flush()?;
     let binds: Vec<u32> = peer
         .requests()
         .iter()

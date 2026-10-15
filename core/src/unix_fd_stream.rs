@@ -10,8 +10,8 @@ use std::{
 use crate::{
     fd_io::{InFdBuffer, OUT_FD_BUFFER_LEN},
     ffi::{
-        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, SCM_RIGHTS, SOL_SOCKET,
-        cmsg_align, cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, MSG_NOSIGNAL, SCM_RIGHTS,
+        SOL_SOCKET, cmsg_align, cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
     },
 };
 
@@ -45,6 +45,13 @@ impl From<UnixStream> for UnixFdStream {
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub(crate) enum ReadMode {
+    Block,
+
+    NonBlock,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub(crate) enum WriteMode {
     Block,
 
     NonBlock,
@@ -135,9 +142,14 @@ impl UnixFdStream {
         }
     }
 
-    pub fn write(&self, data: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
+    pub fn write(
+        &self,
+        data: &[u8],
+        fds: &[Option<OwnedFd>],
+        mode: WriteMode,
+    ) -> std::io::Result<usize> {
         if fds.is_empty() {
-            self.send_all(&mut [], data)
+            self.send_all(&mut [], data, mode)
         } else if fds.len() > OUT_FD_BUFFER_LEN {
             Err(std::io::Error::other("Too many file descriptors to send"))
         } else {
@@ -161,11 +173,18 @@ impl UnixFdStream {
                 dst.copy_from_slice(&fd.to_ne_bytes());
             }
 
-            self.send_all(&mut mut_ctrl_buffer[..cmsg_space], data)
+            self.send_all(&mut mut_ctrl_buffer[..cmsg_space], data, mode)
         }
     }
 
-    fn send_all(&self, msg_control: &mut [u8], buff: &[u8]) -> std::io::Result<()> {
+    /// Returns the bytes sent - all of the data in Block mode.
+    /// The fds were sent iff the result is > 0.
+    fn send_all(
+        &self,
+        msg_control: &mut [u8],
+        buff: &[u8],
+        mode: WriteMode,
+    ) -> std::io::Result<usize> {
         let mut total_bytes_sent = 0;
         let (mut control, mut ctrl_length) = match msg_control {
             [] => (ptr::null_mut(), 0),
@@ -174,6 +193,14 @@ impl UnixFdStream {
                 msg_control.len(),
             ),
         };
+
+        // Do not kill the process on SIGPIPE - let it error out as EPIPE which we handle.
+        let mut flags = MSG_NOSIGNAL;
+
+        if mode == WriteMode::NonBlock {
+            flags |= MSG_DONTWAIT;
+        }
+
         loop {
             let mut iov = iovec {
                 iov_base: buff[total_bytes_sent..].as_ptr() as *mut _,
@@ -191,14 +218,17 @@ impl UnixFdStream {
             };
 
             // SAFETY: msg, iov and control point at buffers for the call; the kernel only reads them.
-            let bytes_sent_or_err = unsafe { sendmsg(self.stream_fd.as_raw_fd(), &msg, 0) };
+            let bytes_sent_or_err = unsafe { sendmsg(self.stream_fd.as_raw_fd(), &msg, flags) };
 
             if bytes_sent_or_err < 0 {
                 let error = std::io::Error::last_os_error();
-                if error.kind() == std::io::ErrorKind::Interrupted {
-                    continue; // retry on EINTR
-                } else {
-                    return Err(error);
+
+                match error.kind() {
+                    std::io::ErrorKind::Interrupted => continue,
+                    std::io::ErrorKind::WouldBlock if mode == WriteMode::NonBlock => {
+                        return Ok(total_bytes_sent);
+                    }
+                    _ => return Err(error),
                 }
             }
 
@@ -212,7 +242,7 @@ impl UnixFdStream {
                 continue; // retry sending the remaining data
             }
 
-            return Ok(());
+            return Ok(total_bytes_sent);
         }
     }
 }
@@ -231,6 +261,6 @@ mod tests {
         let (a, _b) = UnixStream::pair().unwrap();
         let stream = UnixFdStream::from(a);
         let fds: Vec<Option<OwnedFd>> = (0..=OUT_FD_BUFFER_LEN).map(|_| Some(dev_null())).collect();
-        assert!(stream.write(b"x", &fds).is_err());
+        assert!(stream.write(b"x", &fds, WriteMode::Block).is_err());
     }
 }

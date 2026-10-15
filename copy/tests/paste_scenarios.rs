@@ -24,7 +24,7 @@ const COPY: &str = env!("CARGO_BIN_EXE_clipleaf-copy");
 fn paster(comp: &TestCompositor) -> WlSessionManager {
     let stream = WlBufferedStream::connect(&comp.socket_path()).unwrap();
     let mut session = WlSessionManager::initialize(stream).unwrap();
-    let callback_id = session.sync().unwrap();
+    let callback_id = session.schedule_sync().unwrap();
     while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
     {
     }
@@ -40,7 +40,7 @@ fn pasted(comp: &TestCompositor, primary: bool, mime: Option<&str>) -> Vec<u8> {
         .receive_offer(primary, &asked, writer)
         .unwrap()
         .expect("type offered");
-    session.send_messages().unwrap();
+    session.flush().unwrap();
     // Blocking: the relay dups the fd it forwards, so EOF can be microseconds late.
     fds::read_to_eof(&mut reader)
 }
@@ -58,7 +58,7 @@ fn take_over(comp: &TestCompositor, primary: bool) -> WlSessionManager {
     } else {
         session.set_selection(source.local_id).unwrap();
     }
-    let callback_id = session.sync().unwrap();
+    let callback_id = session.schedule_sync().unwrap();
     while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
     {
     }

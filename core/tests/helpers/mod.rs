@@ -59,13 +59,13 @@ impl Rig {
 
     /// Sends what is queued and returns the requests the peer got.
     pub fn flush_and_drain(&mut self) -> Vec<Request> {
-        self.session.send_messages().expect("send_messages");
+        self.session.flush().expect("send_messages");
         self.peer().requests()
     }
 
     /// Sends what is queued and returns the raw batches (with fds).
     pub fn flush_batches(&mut self) -> Vec<Batch> {
-        self.session.send_messages().expect("send_messages");
+        self.session.flush().expect("send_messages");
         self.peer().recv_batches()
     }
 

@@ -1,4 +1,4 @@
-//! `sync()` against the scripted raw peer: every call gets its own callback and each `SyncDone`
+//! `schedule_sync()` against the scripted raw peer: every call gets its own callback and each `SyncDone`
 //! reports the callback it belongs to.
 
 mod helpers;
@@ -8,12 +8,13 @@ use helpers::*;
 #[test]
 fn two_syncs_in_flight_each_report_their_own_callback_in_order() {
     let mut rig = rig();
-    let first = rig.session.sync().unwrap();
-    let second = rig.session.sync().unwrap();
+    let first = rig.session.schedule_sync().unwrap();
+    let second = rig.session.schedule_sync().unwrap();
     assert_ne!(first, second);
 
-    // The ids on the wire are the ones `sync` returned.
-    let requests = rig.peer().requests();
+    // Scheduling only queues; the caller's flush sends both, with the ids `schedule_sync` returned.
+    assert!(rig.peer().recv_batches().is_empty());
+    let requests = rig.flush_and_drain();
     let wire_ids: Vec<u32> = requests
         .iter()
         .inspect(|r| assert_eq!((r.object_id, r.opcode), (DISPLAY, DISPLAY_SYNC)))

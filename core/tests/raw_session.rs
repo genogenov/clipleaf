@@ -152,14 +152,19 @@ fn events_are_delivered_one_at_a_time_in_order() {
 }
 
 #[test]
-fn try_next_event_flushes_queued_requests_even_when_nothing_is_readable() {
-    // Handshake requests are queued but not yet sent; the peer stays silent.
+fn try_next_event_never_flushes_and_one_flush_sends_everything_queued() {
+    // initialize sent get_registry + sync (it waited for the reply); the 2 binds and
+    // get_data_device are queued. The peer stays silent.
     let mut rig = try_rig(&GLOBALS).unwrap();
+    assert_eq!(rig.peer().requests().len(), 2);
     for _ in 0..3 {
         assert!(rig.session.try_next_event().unwrap().is_none());
     }
-    // get_registry, sync, 2 binds, get_data_device: sent although nothing was read.
-    assert_eq!(rig.peer().requests().len(), 5);
+    // A poll loop drains first and flushes once: nothing went out while draining.
+    assert!(rig.peer().recv_batches().is_empty());
+    assert!(rig.session.has_pending_writes());
+    assert_eq!(rig.flush_and_drain().len(), 3);
+    assert!(!rig.session.has_pending_writes());
 }
 
 #[test]
@@ -184,7 +189,7 @@ fn a_burst_is_fully_drained_by_repeated_try_next_event() {
     // Drained, and nothing more however often it is asked.
     assert!(rig.session.try_next_event().unwrap().is_none());
     assert!(rig.session.try_next_event().unwrap().is_none());
-    assert_eq!(destroyed_offers(&rig.peer().requests()), [OFFER_A, OFFER_B]);
+    assert_eq!(destroyed_offers(&rig.flush_and_drain()), [OFFER_A, OFFER_B]);
 }
 
 #[test]
@@ -357,10 +362,10 @@ fn a_replaced_offer_is_destroyed_and_the_destroy_reaches_the_compositor() {
 
     rig.session.next_event().unwrap();
     rig.session.next_event().unwrap();
-    // Back in the loop, even with nothing to read, the queued request is sent.
+    // Back in the loop: drained, then the loop's one flush sends the queued destroy.
     assert!(rig.session.try_next_event().unwrap().is_none());
 
-    let requests = rig.peer().requests();
+    let requests = rig.flush_and_drain();
     assert_eq!(
         requests,
         [wire::Request {
@@ -386,7 +391,7 @@ fn clearing_the_selection_destroys_the_previous_offer() {
         [("selection", Some(OFFER_A)), ("selection", None)]
     );
     assert!(rig.session.get_offer().is_none());
-    assert_eq!(destroyed_offers(&rig.peer().requests()), [OFFER_A]);
+    assert_eq!(destroyed_offers(&rig.flush_and_drain()), [OFFER_A]);
 }
 
 #[test]
@@ -406,7 +411,9 @@ fn selection_churn_destroys_each_previous_offer_and_never_runs_out_of_slots() {
 
     assert_eq!(drain_events(&mut rig.session).len(), rounds);
     let expected: Vec<u32> = (0..rounds - 1).map(|round| ids_in_use[round % 2]).collect();
-    assert_eq!(destroyed_offers(&rig.peer().requests()), expected);
+    // Nothing went out while draining; the loop's one flush sends all 39 destroys.
+    assert!(rig.peer().recv_batches().is_empty());
+    assert_eq!(destroyed_offers(&rig.flush_and_drain()), expected);
 }
 
 #[test]
@@ -498,7 +505,7 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
         .map(|m| m.to_string());
     assert_eq!(asked.as_deref(), Some("text/plain;charset=utf-8"));
 
-    rig.session.send_messages().unwrap();
+    rig.session.flush().unwrap();
     let mut batches = rig.peer().recv_batches();
     assert_eq!(batches.iter().map(|b| b.fds.len()).sum::<usize>(), 1);
     let fd = batches.iter_mut().find_map(|b| b.fds.pop()).unwrap();

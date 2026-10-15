@@ -57,7 +57,8 @@ fn init() -> io::Result<WlSessionManager> {
     let mut mgr = WlSessionManager::initialize(stream)?;
 
     log_debug!("Starting Paste loop");
-    let callback_id = mgr.sync()?;
+    let callback_id = mgr.schedule_sync()?;
+    mgr.flush()?;
 
     while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
     {
@@ -122,7 +123,7 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
     let is_terminal = stdout.is_terminal();
     let add_newline = !args.no_newline && is_terminal && is_text_mime(preferred_mime);
 
-    mgr.send_messages()?;
+    mgr.flush()?;
 
     let mut out_guard = stdout.lock();
     match io::copy(&mut reader, &mut out_guard) {

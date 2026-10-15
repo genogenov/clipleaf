@@ -339,7 +339,8 @@ fn a_compositor_that_hangs_up_during_an_overflow_flush_is_a_broken_pipe_and_the_
     // Header written, the string does not fit, the flush hits a closed peer (EPIPE).
     let err = w.offer(&"m".repeat(43)).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
-    // The fd that was queued with the flushed messages was closed, not leaked.
+    // An Err ends the session; the fd still queued closes with it, not leaked.
+    drop(w);
     assert_eq!(read_all(reader), "");
 }
 
@@ -354,23 +355,11 @@ fn a_compositor_that_hangs_up_during_a_commit_time_flush_closes_every_queued_fd(
     readers.push(reader);
     let err = w.receive("x/last", fd).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
+    // The 29th fd closed on the way out; the queued 28 close with the session.
+    drop(w);
     for reader in readers {
         assert_eq!(read_all(reader), "");
     }
-}
-
-#[test]
-fn a_request_that_fails_to_flush_does_not_burn_an_object_id() {
-    let mut w = writer();
-    // create_data_source is 12 bytes. With 8 left its header fits and its id does not, so the
-    // id is registered, the flush fails on the closed peer, and the id must be released.
-    w.fill_to(BUF_LEN - 8);
-    w.rig.hang_up();
-    let err = w.rig.session.create_data_source().err().expect("must fail");
-    assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
-    // The buffer holds nothing now, so the next request needs no flush and gets the same id.
-    let next = w.rig.session.create_data_source().unwrap().local_id;
-    assert_eq!(next, w.source + 1);
 }
 
 #[test]

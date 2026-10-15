@@ -135,9 +135,8 @@ impl WlSessionManager {
             .set_primary_selection(self.stream.get_writer(), source_id)
     }
 
-    pub fn sync(&mut self) -> Result<u32, std::io::Error> {
+    pub fn schedule_sync(&mut self) -> Result<u32, std::io::Error> {
         let callback_id = WlDisplay::schedule_sync(self.stream.get_writer(), &mut self.router)?;
-        self.stream.write()?;
         Ok(callback_id)
     }
 
@@ -185,8 +184,10 @@ impl WlSessionManager {
     ) -> io::Result<WlSessionEvent> {
         let (mut reader, mut writer) = stream.split();
         loop {
-            // flush queued messages before reading.
-            writer.write()?;
+            if mode == ReadMode::Block {
+                // flush queued messages before reading.
+                writer.write_blocking()?;
+            }
 
             let msg = reader.read_next_message(mode)?;
             if let Some(event) = match router.lookup_interface(msg.0.object_id)? {
@@ -345,8 +346,12 @@ impl WlSessionManager {
         self.stream.get_writer()
     }
 
-    pub fn send_messages(&mut self) -> Result<(), std::io::Error> {
+    pub fn flush(&mut self) -> Result<usize, std::io::Error> {
         self.stream.write()
+    }
+
+    pub fn has_pending_writes(&self) -> bool {
+        self.stream.has_pending_writes()
     }
 
     pub fn receive_offer(

@@ -36,7 +36,7 @@ fn owner(comp: &TestCompositor, mimes: &[&str], primary: bool) -> Owner {
     } else {
         session.set_selection(source.local_id).unwrap();
     }
-    let callback_id = session.sync().unwrap();
+    let callback_id = session.schedule_sync().unwrap();
     while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
     {
     }

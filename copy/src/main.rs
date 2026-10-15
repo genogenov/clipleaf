@@ -87,9 +87,11 @@ fn run() -> io::Result<()> {
         mgr.set_selection(data_source.local_id)?;
     }
 
-    let callback_id = mgr.sync()?;
+    let callback_id = mgr.schedule_sync()?;
 
     let mut detached = args.foreground;
+
+    mgr.flush()?;
 
     loop {
         match mgr.next_event()? {

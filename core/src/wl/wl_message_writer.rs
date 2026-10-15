@@ -80,9 +80,8 @@ impl<'a> WlMessageWriterGuard<'a> {
     fn commit(mut self, fd: Option<OwnedFd>) -> std::io::Result<()> {
         if let Some(fd) = fd {
             if self.0.tx.fds.is_full() {
-                let result = self.0.tx.flush_to(self.0.socket, self.0.start_position);
-                self.0.start_position = 0;
-                result?;
+                let sent = self.0.tx.flush_to(self.0.socket, self.0.start_position)?;
+                self.0.start_position -= sent;
             }
             self.0.tx.fds.push_out_fd(fd)?;
         }
@@ -129,9 +128,8 @@ impl<'a> WlMessageWriterGuard<'a> {
                 "message does not fit in the write buffer",
             )); // > 4096 bytes on its own
         }
-        let result = self.0.tx.flush_to(self.0.socket, start);
-        self.0.start_position = 0;
-        result?;
+        let sent = self.0.tx.flush_to(self.0.socket, start)?;
+        self.0.start_position -= sent;
         if self.0.tx.cursor + n <= self.0.tx.buf.len() {
             // SAFETY: We just checked that the slice is in bounds, so this is safe.
             Ok(unsafe {
@@ -140,9 +138,13 @@ impl<'a> WlMessageWriterGuard<'a> {
                     .buf
                     .get_unchecked_mut(self.0.tx.cursor..self.0.tx.cursor + n)
             })
-        } else {
+        } else if self.0.start_position == 0 {
             Err(std::io::Error::other(
                 "message does not fit in the write buffer",
+            ))
+        } else {
+            Err(std::io::Error::other(
+                "write buffer full: the compositor is not reading",
             ))
         }
     }
@@ -185,6 +187,7 @@ mod tests {
     use super::*;
     use crate::{
         fd_io::OutFdBuffer,
+        unix_fd_stream::WriteMode,
         wl::{
             objects::{
                 wl_data_offer::WlDataControlOffer,
@@ -219,6 +222,7 @@ mod tests {
                     buf: [0xAA; BUF_LEN],
                     cursor: 0,
                     fds: OutFdBuffer::new(),
+                    mode: WriteMode::Block,
                 },
                 sock: a.into(),
                 peer: Some(b),
@@ -381,25 +385,37 @@ mod tests {
         }
     }
 
+    /// Reads `s` to EOF; returns once every copy of its peer is closed.
+    fn eof(s: &mut UnixStream) -> bool {
+        let mut buf = [0u8; 1];
+        matches!(s.read(&mut buf), Ok(0))
+    }
+
     #[test]
-    fn a_send_error_during_an_overflow_flush_leaves_the_buffer_clean() {
+    fn a_send_error_during_an_overflow_flush_keeps_the_complete_messages_and_drops_the_partial_one()
+    {
         let mut h = Harness::new();
-        let (_reader, fd) = UnixStream::pair().unwrap();
+        let (mut reader, fd) = UnixStream::pair().unwrap();
         WlDataControlOffer::receive(0xff00_0000, h.writer(), "a/first", fd.into()).unwrap();
         fill_to(&mut h, BUF_LEN - 20);
+        let complete = h.tx.cursor;
         h.peer = None;
 
         // Header written, the string does not fit, the flush hits a closed peer (EPIPE).
         let err = h.offer(7, &"m".repeat(43)).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
 
-        // Nothing stale: no cursor left behind and no queued fds.
-        assert_eq!(h.tx.cursor, 0);
-        assert!(h.tx.fds.peek_out_fds().is_empty());
+        // An Err changes nothing that was queued: the complete messages and their fd stay,
+        // only the half-built message is gone.
+        assert_eq!(h.tx.cursor, complete);
+        assert_eq!(h.tx.fds.peek_out_fds().len(), 1);
+        // No leak: the queued fd closes with the buffer.
+        drop(h);
+        assert!(eof(&mut reader));
     }
 
     #[test]
-    fn a_send_error_during_a_commit_time_flush_leaves_the_buffer_clean() {
+    fn a_send_error_during_a_commit_time_flush_keeps_the_queue_and_closes_the_new_fd() {
         let mut h = Harness::new();
         let mut keep = Vec::new();
         for i in 0..28 {
@@ -408,16 +424,20 @@ mod tests {
             WlDataControlOffer::receive(0xff00_0000, h.writer(), &format!("x/{i}"), fd.into())
                 .unwrap();
         }
+        let complete = h.tx.cursor;
         h.peer = None;
 
         // The 29th fd does not fit, so the commit flushes first and the flush fails.
-        let (reader, fd) = UnixStream::pair().unwrap();
-        keep.push(reader);
+        let (mut last, fd) = UnixStream::pair().unwrap();
         let err =
             WlDataControlOffer::receive(0xff00_0000, h.writer(), "x/last", fd.into()).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
 
-        assert_eq!(h.tx.cursor, 0);
-        assert!(h.tx.fds.peek_out_fds().is_empty());
+        assert_eq!(h.tx.cursor, complete);
+        assert_eq!(h.tx.fds.peek_out_fds().len(), 28);
+        // The fd of the failed message was closed on the way out, the queued ones with the buffer.
+        assert!(eof(&mut last));
+        drop(h);
+        assert!(keep.iter_mut().all(eof));
     }
 }

@@ -12,7 +12,7 @@ pub type NextMessageResult<'a> = std::io::Result<WlWireMessage<'a>>;
 use crate::{
     fd_io::{InFdBuffer, OutFdBuffer},
     log_debug,
-    unix_fd_stream::{ReadMode, UnixFdStream},
+    unix_fd_stream::{ReadMode, UnixFdStream, WriteMode},
     wl::{objects::MessageHeader, wl_message_writer::WlMessageWriter},
 };
 
@@ -33,6 +33,7 @@ pub(crate) struct WriteBuffer {
     pub(crate) buf: [u8; 4096],
     pub(crate) cursor: usize,
     pub(crate) fds: OutFdBuffer,
+    pub(crate) mode: WriteMode,
 }
 
 // Borrowed halves of a WlBufferedStream: an event from the reader can stay alive while the writer queues requests.
@@ -101,6 +102,7 @@ impl WlBufferedStream {
                 buf: [0u8; 4096],
                 cursor: 0,
                 fds: OutFdBuffer::new(),
+                mode: WriteMode::Block,
             },
         }
     }
@@ -118,12 +120,20 @@ impl WlBufferedStream {
         )
     }
 
+    pub fn set_nonblocking_writes(&mut self) {
+        self.tx.mode = WriteMode::NonBlock;
+    }
+
+    pub fn has_pending_writes(&self) -> bool {
+        self.tx.cursor > 0
+    }
+
     #[cfg(test)]
     pub(crate) fn read_next_message(&mut self, mode: ReadMode) -> NextMessageResult<'_> {
         self.rx.next_message(&self.socket, mode)
     }
 
-    pub fn write(&mut self) -> std::io::Result<()> {
+    pub fn write(&mut self) -> std::io::Result<usize> {
         self.tx.flush(&self.socket)
     }
 
@@ -139,8 +149,12 @@ impl WlStreamReader<'_> {
 }
 
 impl WlStreamWriter<'_> {
-    pub fn write(&mut self) -> std::io::Result<()> {
+    pub fn write(&mut self) -> std::io::Result<usize> {
         self.tx.flush(self.socket)
+    }
+
+    pub fn write_blocking(&mut self) -> std::io::Result<usize> {
+        self.tx.flush_blocking(self.socket)
     }
 
     pub fn get_writer(&mut self) -> WlMessageWriter<'_> {
@@ -210,22 +224,34 @@ impl ReadBuffer {
 }
 
 impl WriteBuffer {
-    pub(crate) fn flush(&mut self, socket: &UnixFdStream) -> std::io::Result<()> {
+    pub(crate) fn flush(&mut self, socket: &UnixFdStream) -> std::io::Result<usize> {
         if self.cursor == 0 {
-            return Ok(());
+            return Ok(0);
         }
-        log_debug!("Writing {} bytes to the stream", self.cursor);
-        let result = socket.write(&self.buf[..self.cursor], self.fds.peek_out_fds());
-        self.cursor = 0;
-        self.fds.clear_and_close_out_fds();
-        result
+        self.flush_to_with_mode(socket, self.cursor, self.mode)
+    }
+
+    pub(crate) fn flush_blocking(&mut self, socket: &UnixFdStream) -> std::io::Result<usize> {
+        if self.cursor == 0 {
+            return Ok(0);
+        }
+        self.flush_to_with_mode(socket, self.cursor, WriteMode::Block)
     }
 
     fn message_writer<'a>(&'a mut self, socket: &'a UnixFdStream) -> WlMessageWriter<'a> {
         WlMessageWriter::new(self, socket)
     }
 
-    pub(crate) fn flush_to(&mut self, socket: &UnixFdStream, n: usize) -> std::io::Result<()> {
+    pub(crate) fn flush_to(&mut self, socket: &UnixFdStream, n: usize) -> std::io::Result<usize> {
+        self.flush_to_with_mode(socket, n, self.mode)
+    }
+
+    fn flush_to_with_mode(
+        &mut self,
+        socket: &UnixFdStream,
+        n: usize,
+        mode: WriteMode,
+    ) -> std::io::Result<usize> {
         if n > self.cursor {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -233,11 +259,13 @@ impl WriteBuffer {
             ));
         }
         log_debug!("Flushing {} bytes to the stream", n);
-        let result = socket.write(&self.buf[..n], self.fds.peek_out_fds());
-        self.buf.copy_within(n..self.cursor, 0);
-        self.cursor -= n;
-        self.fds.clear_and_close_out_fds();
-        result
+        let sent = socket.write(&self.buf[..n], self.fds.peek_out_fds(), mode)?;
+        if sent > 0 {
+            self.fds.clear_and_close_out_fds(); // they went with the first byte
+        }
+        self.buf.copy_within(sent..self.cursor, 0);
+        self.cursor -= sent;
+        Ok(sent)
     }
 }
 
