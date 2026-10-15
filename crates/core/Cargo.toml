@@ -4,4 +4,4 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
-clipleaf-test-common = { path = "../tests/common" }
+clipleaf-test-common = { path = "../tests-common" }

@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["core", "copy", "paste", "tests/common"]
+members = ["crates/*"]
 # Plain `cargo build` / `cargo build --release` skip the dev-only test crate (and its wayland
 # dependencies); CI and the full check use --workspace so it is still linted and tested.
-default-members = ["core", "copy", "paste"]
+default-members = ["crates/core", "crates/copy", "crates/paste", "crates/daemon"]
 
 [workspace.package]
 version = "0.1.0"

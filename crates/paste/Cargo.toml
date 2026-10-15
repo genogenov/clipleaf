@@ -1,0 +1,10 @@
+[package]
+name = "clipleaf-paste"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clipleaf-core = { path = "../core" }
+
+[dev-dependencies]
+clipleaf-test-common = { path = "../tests-common" }

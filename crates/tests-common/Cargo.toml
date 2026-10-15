@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-# Dev-only: used as a [dev-dependencies] entry of core, copy and paste, never shipped.
+# Dev-only: used as a [dev-dependencies] entry, never shipped.
 # Pure-Rust wayland backend: do not enable `system` or `log` (they need C and pkg-config).
 [dependencies]
 wayland-server = "0.31.7"

@@ -1,5 +1,5 @@
 [package]
-name = "clipleaf-copy"
+name = "clipleafd"
 version.workspace = true
 edition.workspace = true
 
@@ -7,4 +7,4 @@ edition.workspace = true
 clipleaf-core = { path = "../core" }
 
 [dev-dependencies]
-clipleaf-test-common = { path = "../tests/common" }
+clipleaf-test-common = { path = "../tests-common" }
