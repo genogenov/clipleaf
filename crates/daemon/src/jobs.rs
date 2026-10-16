@@ -23,7 +23,6 @@ pub struct JobMsg {
 
 #[derive(Debug)]
 pub enum JobOutcome {
-    Finished,
     Cancelled,
     Panicked,
 }

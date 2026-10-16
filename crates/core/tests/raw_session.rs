@@ -500,7 +500,7 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
     let (mut payload, fd) = fds::channel();
     let asked = rig
         .session
-        .receive_offer(false, &None, fd)
+        .receive_offer(false, None, fd)
         .unwrap()
         .map(|m| m.to_string());
     assert_eq!(asked.as_deref(), Some("text/plain;charset=utf-8"));
@@ -526,7 +526,7 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
 fn receive_offer_with_a_type_that_is_not_offered_asks_for_nothing_and_with_no_offer_fails() {
     let mut rig = rig();
     let (mut payload, fd) = fds::channel();
-    let err = err_of(rig.session.receive_offer(false, &None, fd));
+    let err = err_of(rig.session.receive_offer(false, None, fd));
     assert!(err.to_string().contains("nothing found to paste"), "{err}");
     // The fd was not leaked on the way out.
     assert_eq!(fds::read_to_eof_now(&mut payload), b"");
@@ -536,10 +536,9 @@ fn receive_offer_with_a_type_that_is_not_offered_asks_for_nothing_and_with_no_of
     rig.peer().send(&events);
     rig.session.next_event().unwrap();
     let (mut payload, fd) = fds::channel();
-    let asked = Some("image/png".to_owned());
     assert!(
         rig.session
-            .receive_offer(false, &asked, fd)
+            .receive_offer(false, Some("image/png"), fd)
             .unwrap()
             .is_none()
     );

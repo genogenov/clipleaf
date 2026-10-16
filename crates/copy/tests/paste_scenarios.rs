@@ -35,9 +35,8 @@ fn paster(comp: &TestCompositor) -> WlSessionManager {
 fn pasted(comp: &TestCompositor, primary: bool, mime: Option<&str>) -> Vec<u8> {
     let mut session = paster(comp);
     let (mut reader, writer) = fds::channel();
-    let asked = mime.map(str::to_owned);
     session
-        .receive_offer(primary, &asked, writer)
+        .receive_offer(primary, mime, writer)
         .unwrap()
         .expect("type offered");
     session.flush().unwrap();

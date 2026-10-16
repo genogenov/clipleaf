@@ -60,7 +60,7 @@ fn an_owner_serves_a_paster_through_the_relay() {
         ["text/plain"]
     );
     let (mut reader, writer) = fds::channel();
-    let asked = paster.receive_offer(false, &None, writer).unwrap();
+    let asked = paster.receive_offer(false, None, writer).unwrap();
     assert_eq!(asked.map(|m| m.as_ref()), Some("text/plain"));
     paster.flush().unwrap();
 
@@ -150,7 +150,7 @@ fn an_owner_that_disconnects_clears_the_selection() {
     assert!(paster.get_offer().is_none());
     let (_reader, writer) = fds::channel();
     let err = paster
-        .receive_offer(false, &None, writer)
+        .receive_offer(false, None, writer)
         .expect_err("must fail");
     assert!(err.to_string().contains("nothing found to paste"), "{err}");
 }
@@ -264,7 +264,7 @@ fn a_receive_on_an_offer_the_device_no_longer_holds_is_not_forwarded() {
     let (_second_owner, _) = owner_of(&comp, &["text/plain"], false);
 
     let (mut reader, writer) = fds::channel();
-    paster.receive_offer(false, &None, writer).unwrap();
+    paster.receive_offer(false, None, writer).unwrap();
     // The relay handled the receive before it answers this sync. Check the notes before reading
     // the payload, so a regression fails here instead of waiting for a `send` nobody serves.
     // (The paster ignores the news that came meanwhile; only the old offer matters here.)
