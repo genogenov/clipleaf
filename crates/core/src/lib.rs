@@ -1,4 +1,5 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
+mod event_fd;
 mod fd_io;
 pub mod ffi;
 #[doc(hidden)]
@@ -25,6 +26,7 @@ pub use wl::{
     wl_session_manager::{WlSessionEvent, WlSessionManager},
 };
 
+pub use event_fd::EventFd;
 pub use fd_io::{serve_bytes, serve_file};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
 pub use mime::parse_mime;

@@ -96,18 +96,17 @@ fn get_offered_types(mgr: &mut WlSessionManager, primary: bool) -> &[Cow<'static
 
 fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Result<()> {
     let (mut reader, writer) = io::pipe()?;
-    let asked_mime = &args.mime;
     let fd = OwnedFd::from(writer);
 
     // SAFETY: fd is an open pipe we own and F_SETPIPE_SZ is a valid fcntl command for setting the pipe size, which takes one arg.
     // If this fails we are OK to ignore and proceed.
     unsafe { fcntl(fd.as_raw_fd(), F_SETPIPE_SZ, 1 << 20) };
-    let Some(preferred_mime) = mgr.receive_offer(args.primary, asked_mime, fd)? else {
+    let Some(preferred_mime) = mgr.receive_offer(args.primary, args.mime.as_deref(), fd)? else {
         return Err(io::Error::new(
             InvalidInput,
             format!(
                 "The requested MIME type {:?} is not available. The avaliable mime types are:\n{}",
-                asked_mime,
+                args.mime,
                 get_offered_types(mgr, args.primary).join("\n")
             ),
         ));
@@ -115,7 +114,7 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
 
     log_debug!(
         "Asked mime: {:?}, preferred mime: {:?}",
-        asked_mime,
+        args.mime,
         preferred_mime
     );
 

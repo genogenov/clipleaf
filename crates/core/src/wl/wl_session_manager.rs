@@ -357,7 +357,7 @@ impl WlSessionManager {
     pub fn receive_offer(
         &mut self,
         primary: bool,
-        preferred_mime: &Option<String>,
+        preferred_mime: Option<&str>,
         fd: OwnedFd,
     ) -> Result<Option<&Cow<'_, str>>, std::io::Error> {
         let Some(offer) = (if primary {

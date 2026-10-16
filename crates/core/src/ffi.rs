@@ -34,6 +34,9 @@ unsafe extern "C" {
 
     /// Waits for events on a set of file descriptors. Link to doc: https://man7.org/linux/man-pages/man2/poll.2.html
     pub fn poll(fds: *mut pollfd, nfds: std::ffi::c_ulong, timeout: i32) -> i32;
+
+    /// Creates a file descriptor for event notification. Link to doc: https://man7.org/linux/man-pages/man2/eventfd.2.html
+    pub fn eventfd(initval: u32, flags: i32) -> i32;
 }
 
 pub const F_GETPIPE_SZ: i32 = 1032;
@@ -43,6 +46,10 @@ pub const F_SETPIPE_SZ: i32 = 1031;
 pub const F_GETFL: i32 = 3;
 
 pub const F_SETFL: i32 = 4;
+
+pub const EFD_NONBLOCK: i32 = O_NONBLOCK;
+
+pub const EFD_CLOEXEC: i32 = O_CLOEXEC;
 
 pub const SCM_RIGHTS: i32 = 0x01;
 
@@ -105,6 +112,12 @@ pub const O_NONBLOCK: i32 = 1 << 14;
     target_arch = "sparc64"
 )))]
 pub const O_NONBLOCK: i32 = 1 << 11;
+
+#[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+pub const O_CLOEXEC: i32 = 1 << 22;
+
+#[cfg(not(any(target_arch = "sparc", target_arch = "sparc64")))]
+pub const O_CLOEXEC: i32 = 1 << 19;
 
 #[cfg(not(any(
     target_arch = "mips",
