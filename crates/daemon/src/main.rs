@@ -2,26 +2,24 @@
 mod jobs;
 mod offers_fetch;
 
-use core::slice;
 use std::{
-    borrow::Cow,
-    io::{self, Error, PipeReader, Read},
-    iter, mem,
+    io::{self, Error},
     os::fd::AsFd,
     process::ExitCode,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use clipleaf_core::{
-    EventFd, PollFd, PollResult, WlBufferedStream, WlDataControlOffer, WlSessionEvent,
-    WlSessionManager,
-    ffi::{POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT},
-    init_logging, log_debug, log_error, log_info, pick_fetch_mimes, poll,
+    PollFd, WlBufferedStream, WlDataControlOffer, WlSessionEvent, WlSessionManager,
+    ffi::{POLLIN, POLLNVAL, POLLOUT},
+    init_logging, log_debug, log_error, log_info, poll,
 };
 
-use crate::{jobs::{JobData, JobList, JobOutcome, JobResult}, offers_fetch::start_fetch};
+use crate::{
+    jobs::{JobData, JobList, JobOutcome, JobResult},
+    offers_fetch::start_fetch,
+};
 
-const MAX_KNOWN_RETAINED_OFFERS: usize = 10;
 const FETCH_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn main() -> ExitCode {
@@ -79,7 +77,10 @@ fn run() -> io::Result<()> {
                     JobResult::Done(JobOutcome::TimedOut) => {
                         log_info!("job {}: source went silent, entry dropped", msg.id)
                     }
-                    res => log_error!("job {} failed: {res:?}", msg.id), // Failed, Panicked
+                    JobResult::Done(JobOutcome::Failed(e)) => {
+                        log_error!("job {} failed: {e}", msg.id)
+                    }
+                    JobResult::Panicked => log_error!("job {} panicked", msg.id),
                 }
             }
         }
@@ -96,6 +97,7 @@ fn run() -> io::Result<()> {
             }
         }
         if changed_offer {
+            log_selection(session.get_offer());
             if let Err(e) = start_fetch(&mut session, &mut jobs, FETCH_IDLE_TIMEOUT) {
                 log_error!("Failed to start fetch offer job: {e}");
             }

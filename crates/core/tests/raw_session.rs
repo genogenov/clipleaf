@@ -552,9 +552,9 @@ fn mime_types_are_filtered_deduplicated_and_capped() {
     let mut events = device_event(DEVICE_DATA_OFFER, OFFER_A);
     // Order kept, duplicates dropped, invalid types (control characters, empty, non-UTF-8) skipped.
     for mime in [
-        &b"image/png"[..],
+        &b"image/webp"[..],
         b"text/plain",
-        b"image/png",
+        b"image/webp",
         b"text/\x1b[31m",
         b"",
         b"text/\xff",
@@ -571,7 +571,7 @@ fn mime_types_are_filtered_deduplicated_and_capped() {
 
     let types = rig.session.get_offer().unwrap().offered_mime_types();
     assert_eq!(types.len(), 128);
-    assert_eq!(types[..2], ["image/png", "text/plain"]);
+    assert_eq!(types[..2], ["image/webp", "text/plain"]);
     // Known types are the static strings; others are allocated.
     assert!(matches!(types[0], std::borrow::Cow::Owned(_)));
     assert!(matches!(types[1], std::borrow::Cow::Borrowed(_)));
@@ -603,6 +603,14 @@ fn the_preferred_type_is_the_best_known_text_then_other_text_then_the_first() {
     assert_eq!(
         preferred(&["image/png", "image/jpeg"]).as_deref(),
         Some("image/png")
+    );
+    assert_eq!(
+        preferred(&["text/plain;charset=utf-16", "text/html"]).as_deref(),
+        Some("text/html")
+    );
+    assert_eq!(
+        preferred(&["text/plain;charset=utf-16", "image/png"]).as_deref(),
+        Some("text/plain;charset=utf-16")
     );
     assert_eq!(preferred(&[]), None);
 }

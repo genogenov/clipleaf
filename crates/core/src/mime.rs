@@ -1,11 +1,3 @@
-use core::borrow;
-use std::{
-    borrow::{Borrow, Cow},
-    iter::Inspect,
-    marker::PhantomData,
-    path::Iter,
-};
-
 use crate::{log_debug, mime_types::KDE_PASSWDMANAGER_HINT};
 
 pub mod types {
@@ -24,15 +16,8 @@ pub mod types {
     pub const KDE_CUT_MARKER: &str = "application/x-kde-cutselection";
     pub const KDE_URI_LIST: &str = "application/x-kde4-urilist";
 
-    /// Ordered in preference order most to least
-    pub const PREFERRED_TXT_MIME_TYPES: [&str; 6] = [
-        TEXT_PLAIN_UTF8,
-        UTF8_STRING,
-        TEXT_PLAIN,
-        TEXT_PLAIN_UTF16,
-        STRING,
-        TEXT,
-    ];
+    /// The plain text types, most preferred first. `copy` offers all of them.
+    pub const TEXT_MIME_TYPES: [&str; 5] = [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
 
     pub const PREFERRED_TXT_LIKE_MIME_TYPES: [&str; 2] = [TEXT_HTML, TEXT_MARKDOWN];
 
@@ -43,12 +28,9 @@ pub mod types {
         GNOME_COPIED_FILES,
     ];
 
-    pub const TXT_MIME_TYPES_FOR_OFFER: [&str; 5] =
-        [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
-
     pub const PREFERRED_IMAGE_MIME_TYPES: [&str; 1] = [IMAGE_PNG];
 
-    pub const KNOWN_MIME_TYPES: [&str; 13] = [
+    pub const KNOWN_MIME_TYPES: [&str; 14] = [
         // text
         TEXT_PLAIN_UTF8,
         UTF8_STRING,
@@ -57,6 +39,7 @@ pub mod types {
         STRING,
         TEXT,
         TEXT_HTML,
+        TEXT_MARKDOWN,
         //image
         IMAGE_PNG,
         //file,
@@ -73,6 +56,8 @@ pub mod types {
 pub enum MimeKind {
     Text(usize),
     TextLike(usize),
+    /// Text in an encoding a terminal can't show (UTF-16): ranked below HTML and other `text/` types.
+    TextExtended,
     FileList(usize),
     Image(usize),
     Other,
@@ -84,7 +69,7 @@ fn position(list: &[&str], m: &str) -> Option<usize> {
 }
 
 pub fn classify_mime(m: &str) -> MimeKind {
-    if let Some(r) = position(&types::PREFERRED_TXT_MIME_TYPES, m) {
+    if let Some(r) = position(&types::TEXT_MIME_TYPES, m) {
         MimeKind::Text(r)
     } else if let Some(r) = position(&types::PREFERRED_TXT_LIKE_MIME_TYPES, m) {
         MimeKind::TextLike(r)
@@ -92,6 +77,8 @@ pub fn classify_mime(m: &str) -> MimeKind {
         MimeKind::FileList(r)
     } else if let Some(r) = position(&types::PREFERRED_IMAGE_MIME_TYPES, m) {
         MimeKind::Image(r)
+    } else if m == types::TEXT_PLAIN_UTF16 {
+        MimeKind::TextExtended
     } else if m == KDE_PASSWDMANAGER_HINT {
         MimeKind::Password
     } else if m.starts_with("text/") {
@@ -119,7 +106,9 @@ pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) ->
     for (i, m) in mimes.iter().enumerate() {
         match classify_mime(m.as_ref()) {
             MimeKind::Password => return Vec::new(),
-            k @ (MimeKind::Text(_) | MimeKind::TextLike(_)) if alias.is_none_or(|(b, _)| k < b) => {
+            k @ (MimeKind::Text(_) | MimeKind::TextLike(_) | MimeKind::TextExtended)
+                if alias.is_none_or(|(b, _)| k < b) =>
+            {
                 alias = Some((k, i))
             }
             k @ MimeKind::Image(_) if image.is_none_or(|(b, _)| k < b) => image = Some((k, i)),

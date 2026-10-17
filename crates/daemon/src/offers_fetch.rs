@@ -12,24 +12,25 @@ use clipleaf_core::{
     log_error, pick_fetch_mimes, poll,
 };
 
-use crate::{
-    MAX_KNOWN_RETAINED_OFFERS,
-    jobs::{JobData, JobList, JobOutcome},
-    log_selection,
-};
+use crate::jobs::{JobData, JobList, JobOutcome};
+
+/// Upper bound on the types fetched per copy; the default pick yields at most 6 (text + image + 4 file lists).
+const MAX_FETCHED_TYPES: usize = 10;
 
 struct FetchOp {
     mime: Cow<'static, str>,
     pipe: Option<PipeReader>,
     bytes: u64,
-    is_complete: bool,
 }
 
-pub fn start_fetch(session: &mut WlSessionManager, jobs: &mut JobList, idle_timeout: Duration) -> io::Result<()> {
-    let offer = session.get_offer();
-    log_selection(offer);
-    if let Some(mimes) =
-        offer.map(|o| pick_fetch_mimes(o.offered_mime_types(), MAX_KNOWN_RETAINED_OFFERS))
+pub fn start_fetch(
+    session: &mut WlSessionManager,
+    jobs: &mut JobList,
+    idle_timeout: Duration,
+) -> io::Result<()> {
+    if let Some(mimes) = session
+        .get_offer()
+        .map(|o| pick_fetch_mimes(o.offered_mime_types(), MAX_FETCHED_TYPES))
         && !mimes.is_empty()
     {
         let mut pipes = Vec::new();
@@ -60,7 +61,6 @@ fn fetch(
             mime: mime,
             pipe: Some(pipe),
             bytes: 0,
-            is_complete: false,
         })
         .collect::<Vec<_>>();
 
@@ -77,10 +77,11 @@ fn fetch(
                 .collect::<Vec<_>>();
 
             if fds.len() == 1 {
+                // Every pipe reached EOF: a read error returns early (never partial).
                 let result = fetch_ops
-                    .iter()
-                    .filter(|o| o.is_complete && o.bytes > 0)
-                    .map(|op| (op.mime.clone(), op.bytes))
+                    .into_iter()
+                    .filter(|o| o.bytes > 0)
+                    .map(|op| (op.mime, op.bytes))
                     .collect();
 
                 return JobOutcome::Data(JobData::Fetch(result));
@@ -110,15 +111,11 @@ fn fetch(
                     if active {
                         let reader = op.pipe.as_mut().unwrap();
                         match reader.read(&mut buff) {
-                            Ok(0) => {
-                                op.pipe = None;
-                                op.is_complete = true;
-                            }
+                            Ok(0) => op.pipe = None,
                             Ok(n) => {
                                 op.bytes += n as u64;
                             }
                             Err(e) => {
-                                op.pipe = None;
                                 log_error!(
                                     "Failed to read from pipe for mime type {} : {}",
                                     op.mime,

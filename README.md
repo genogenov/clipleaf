@@ -74,7 +74,7 @@ Writes the clipboard or the primary selection to stdout.
 | `-n`, `--no-newline` | Never add a trailing newline. By default one is added only when printing text to a terminal. |
 | `-h`, `--help` | Show help. |
 
-Without `--type`, `paste` picks the best text type (`text/plain;charset=utf-8` first), or the first offered type if there is no text.
+Without `--type`, `paste` picks the best text type (`text/plain;charset=utf-8` first), then other text such as HTML, then a file list, then an image, and otherwise the first offered type.
 
 ### Examples
 

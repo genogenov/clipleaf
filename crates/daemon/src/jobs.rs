@@ -1,8 +1,15 @@
 use std::{
-    borrow::Cow, collections::VecDeque, fmt::Debug, io, os::fd::AsFd, sync::{
+    borrow::Cow,
+    collections::VecDeque,
+    fmt::Debug,
+    io,
+    os::fd::AsFd,
+    sync::{
         Arc,
         mpsc::{self},
-    }, thread, time::{Duration, Instant},
+    },
+    thread,
+    time::{Duration, Instant},
 };
 
 use clipleaf_core::{EventFd, log_debug, log_error};
@@ -27,13 +34,13 @@ pub enum JobOutcome {
 #[derive(Debug)]
 pub enum JobResult {
     Done(JobOutcome),
-    Panicked
+    Panicked,
 }
 
 pub struct JobMsg {
     pub id: JobId,
     pub result: JobResult,
-    pub elapsed: Duration
+    pub elapsed: Duration,
 }
 
 #[derive(Clone)]
@@ -72,7 +79,7 @@ impl JobGuard {
         if let Err(e) = self.publish.tx.send(JobMsg {
             id: self.id,
             result,
-            elapsed: self.started.elapsed()
+            elapsed: self.started.elapsed(),
         }) {
             return Err(io::Error::other(format!(
                 "failed to send JobMsg to receiver: {}",
@@ -91,7 +98,7 @@ impl Drop for JobGuard {
             _ = self.publish.tx.send(JobMsg {
                 id: self.id,
                 result: JobResult::Panicked,
-                elapsed: self.started.elapsed()
+                elapsed: self.started.elapsed(),
             });
             _ = self.publish.event.signal();
         }
@@ -137,7 +144,7 @@ impl JobList {
                     id,
                     publish: guard_publish,
                     sent: false,
-                    started: started
+                    started: started,
                 };
                 let outcome = body(&job_cancel);
                 _ = guard.finish(JobResult::Done(outcome));
@@ -179,7 +186,7 @@ impl JobList {
     pub fn try_next_done(&mut self) -> Option<JobMsg> {
         while let Ok(msg) = self.subscribe.rx.try_recv() {
             if let Some(j_idx) = self.active.iter().position(|j| j.id == msg.id) {
-                let job = self.active.remove(j_idx).unwrap();
+                self.active.remove(j_idx); // drops the job's cancel eventfd
                 log_debug!(
                     "Job {} completed with outcome {:?} in {:?}",
                     msg.id,
@@ -189,7 +196,7 @@ impl JobList {
 
                 return Some(msg);
             } else if let Some(j_idx) = self.cancelling.iter().position(|j| j.id == msg.id) {
-                let job = self.cancelling.swap_remove(j_idx);
+                self.cancelling.swap_remove(j_idx);
                 log_debug!(
                     "Job {} was cancelled and completed with outcome {:?} in {:?}",
                     msg.id,

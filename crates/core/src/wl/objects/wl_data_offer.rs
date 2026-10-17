@@ -1,7 +1,11 @@
 use std::{borrow::Cow, os::fd::OwnedFd};
 
 use crate::{
-    fd_io::InFdBuffer, log_debug, mime_types::KNOWN_MIME_TYPES, parse_mime, wl::{
+    fd_io::InFdBuffer,
+    log_debug,
+    mime_types::KNOWN_MIME_TYPES,
+    parse_mime,
+    wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
         wl_message_writer::WlMessageWriter,

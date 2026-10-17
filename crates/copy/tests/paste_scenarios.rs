@@ -12,7 +12,9 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use clipleaf_core::{WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::PREFERRED_TXT_MIME_TYPES};
+use clipleaf_core::{
+    WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::TEXT_MIME_TYPES,
+};
 use clipleaf_test_common::{
     Config, Note, TestCompositor,
     bins::{self, Started},
@@ -141,7 +143,7 @@ fn stderr(output: &Output) -> String {
 fn a_text_argument_is_offered_as_the_five_text_types_and_served_to_every_paster() {
     let comp = compositor();
     let (_copy, types) = foreground(&comp, &["hello"], false);
-    assert_eq!(types, PREFERRED_TXT_MIME_TYPES);
+    assert_eq!(types, TEXT_MIME_TYPES);
     assert_eq!(pasted(&comp, false, None), b"hello");
     assert_eq!(pasted(&comp, false, Some("UTF8_STRING")), b"hello");
     assert_eq!(pasted(&comp, false, None), b"hello");
@@ -177,7 +179,7 @@ fn stdin_is_copied_whatever_its_size_and_served_again_to_every_paster() {
         let comp = compositor();
         let expected = data(len);
         let (_copy, types) = copy_stdin(&comp, &[], &expected);
-        assert_eq!(types, PREFERRED_TXT_MIME_TYPES);
+        assert_eq!(types, TEXT_MIME_TYPES);
         for paste in 1..=2 {
             assert_same(
                 &pasted(&comp, false, None),
@@ -222,7 +224,7 @@ fn the_primary_option_sets_only_the_primary_selection() {
     let comp = compositor();
     let (_clip, _) = foreground(&comp, &["clip"], false);
     let (_prim, types) = foreground(&comp, &["-p", "prim"], true);
-    assert_eq!(types, PREFERRED_TXT_MIME_TYPES);
+    assert_eq!(types, TEXT_MIME_TYPES);
     assert_eq!(pasted(&comp, false, None), b"clip");
     assert_eq!(pasted(&comp, true, None), b"prim");
 }
@@ -264,7 +266,7 @@ fn by_default_the_parent_exits_after_the_sync_and_exactly_one_child_keeps_servin
     });
     assert_eq!(
         selected.expect("the selection was set before the parent exited"),
-        &PREFERRED_TXT_MIME_TYPES
+        &TEXT_MIME_TYPES
     );
     assert_eq!(
         procs::find("clipleaf-copy", comp.runtime_dir()).len(),
