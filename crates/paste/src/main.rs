@@ -12,9 +12,7 @@ use std::{
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager,
-    ffi::{F_SETPIPE_SZ, fcntl},
-    init_logging, log_debug, log_error,
+    WlBufferedStream, WlSessionEvent, WlSessionManager, ffi::{F_SETPIPE_SZ, fcntl}, init_logging, log_debug, log_error, mime_types::PREFERRED_TXT_MIME_TYPES,
 };
 
 use crate::args::{Command, PasteArgs};
@@ -138,5 +136,5 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
 }
 
 fn is_text_mime(mime: &str) -> bool {
-    mime.starts_with("text/") || OFFERED_TXT_MIME_TYPES.contains(&mime)
+    mime.starts_with("text/") || PREFERRED_TXT_MIME_TYPES.contains(&mime)
 }

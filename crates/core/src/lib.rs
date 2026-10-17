@@ -14,7 +14,7 @@ pub use wl::{
         wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
         wl_data_managers::DataDeviceManagerExt,
         wl_data_managers::ExtDataControlManagerV1,
-        wl_data_offer::{DataControlOfferEvent, OFFERED_TXT_MIME_TYPES, WlDataControlOffer},
+        wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
         wl_data_source::WlDataControlSourceEvent,
         wl_display::WlDisplay,
         wl_registry::{BoundInterface, WlSeat},
@@ -29,5 +29,5 @@ pub use wl::{
 pub use event_fd::EventFd;
 pub use fd_io::{serve_bytes, serve_file};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
-pub use mime::parse_mime;
+pub use mime::{parse_mime, pick_best_mime, pick_fetch_mimes, types as mime_types};
 pub use poll::{PollFd, PollResult, poll};

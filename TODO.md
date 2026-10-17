@@ -1,7 +1,7 @@
 # Todo
 
 - `history`
-  - Daemon that watches the clipboard and saves every copy to disk, all of its MIME types, without blocking the Wayland connection
+  - Daemon that watches the clipboard and saves every copy to disk (best text and image type plus file lists by default, more via settings), without blocking the Wayland connection
   - Keeps the clipboard alive after the source app exits or clears it
   - Restore any older entry to the clipboard
   - Case-insensitive search over the full content, not just previews

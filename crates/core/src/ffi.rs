@@ -181,6 +181,7 @@ pub const fn cmsg_space(len: usize) -> usize {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct pollfd {
     pub fd: i32,
     pub events: i16,

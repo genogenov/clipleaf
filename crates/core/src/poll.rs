@@ -8,6 +8,7 @@ use std::{
 use crate::ffi::{self, pollfd};
 
 #[repr(transparent)]
+#[derive(Clone, Copy)]
 pub struct PollFd<'fd> {
     raw: pollfd,
     _fd: PhantomData<BorrowedFd<'fd>>,

@@ -8,7 +8,7 @@ use std::{
     os::fd::OwnedFd,
 };
 
-use clipleaf_core::{OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager};
+use clipleaf_core::{WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::PREFERRED_TXT_MIME_TYPES};
 use clipleaf_test_common::{Config, Note, TestCompositor, compositor, compositor_with, fds};
 
 fn session(comp: &TestCompositor) -> WlSessionManager {
@@ -162,7 +162,7 @@ fn a_new_selection_reaches_a_paster_that_is_already_listening() {
     until_sync(&mut paster);
     assert!(paster.get_offer().is_none());
 
-    let (_owner, _) = owner_of(&comp, &OFFERED_TXT_MIME_TYPES, false);
+    let (_owner, _) = owner_of(&comp, &PREFERRED_TXT_MIME_TYPES, false);
     loop {
         if let WlSessionEvent::Selection { offer_id: Some(_) } = paster.next_event().unwrap() {
             break;
@@ -170,7 +170,7 @@ fn a_new_selection_reaches_a_paster_that_is_already_listening() {
     }
     assert_eq!(
         paster.get_offer().unwrap().offered_mime_types(),
-        OFFERED_TXT_MIME_TYPES
+        PREFERRED_TXT_MIME_TYPES
     );
 }
 

@@ -5,12 +5,7 @@ use std::{
 };
 
 use crate::{
-    BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt,
-    ExtDataControlManagerV1, WlBufferedStream, WlDataControlDevice, WlDataControlOffer,
-    WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker, WlSeat,
-    log_debug,
-    unix_fd_stream::ReadMode,
-    wl::{
+    BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt, ExtDataControlManagerV1, WlBufferedStream, WlDataControlDevice, WlDataControlOffer, WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker, WlSeat, log_debug, pick_best_mime, unix_fd_stream::ReadMode, wl::{
         objects::{
             WlCallbackEvents, WlGlobal, WlInterface, wl_data_source::WlDataControlSource,
             wl_display::DisplayEvent, wl_registry::WlRegistry,
@@ -371,12 +366,12 @@ impl WlSessionManager {
         log_debug!(
             "Selected offer: id = {}, mime = {:?}",
             offer.id(),
-            offer.preferred_mime_type()
+            pick_best_mime(offer.offered_mime_types())
         );
 
         let Some(preferred_mime) = preferred_mime
             .as_ref()
-            .map_or_else(|| offer.preferred_mime_type(), |s| offer.asked_mime_type(s))
+            .map_or_else(|| pick_best_mime(offer.offered_mime_types()), |s| offer.asked_mime_type(s))
         else {
             return Ok(None);
         };

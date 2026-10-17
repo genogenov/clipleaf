@@ -18,7 +18,7 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 - [x] `clipleaf-paste`: paste the best text type or any specific type, or list what's on offer
 - [x] Zero dependencies for `clipleaf-core`, `clipleaf-copy` and `clipleaf-paste`: no libwayland, no libc crate, only Rust's standard library and hand-written bindings for the few system calls they need
 - [x] At least as fast as wl-clipboard, with bounded memory for large copies ([benchmarks](BENCHMARKS.md))
-- [ ] History daemon: keeps every copy with all of its formats, persists and indexes it, re-owns the clipboard when the source app exits or clears it, and offers an IPC control interface
+- [ ] History daemon: keeps every copy (best text and image format plus file lists by default, more via settings), persists and indexes it, re-owns the clipboard when the source app exits or clears it, and offers an IPC control interface
 - [ ] Search over the full content of every entry
 - [ ] TUI: search, preview, pin, delete, restore, and paste into the focused app
 - [ ] GUI: instant pop-up with the same actions, image thumbnails and CSS theming

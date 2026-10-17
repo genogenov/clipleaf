@@ -1,13 +1,8 @@
 use std::{
-    collections::VecDeque,
-    io,
-    os::fd::AsFd,
-    sync::{
+    borrow::Cow, collections::VecDeque, fmt::Debug, io, os::fd::AsFd, sync::{
         Arc,
         mpsc::{self},
-    },
-    thread,
-    time::Instant,
+    }, thread, time::{Duration, Instant},
 };
 
 use clipleaf_core::{EventFd, log_debug, log_error};
@@ -16,15 +11,29 @@ pub const MAX_JOBS: usize = 8;
 
 pub type JobId = u64;
 
-pub struct JobMsg {
-    id: JobId,
-    outcome: JobOutcome,
+#[derive(Debug)]
+pub enum JobData {
+    Fetch(Vec<(Cow<'static, str>, u64)>),
 }
 
 #[derive(Debug)]
 pub enum JobOutcome {
     Cancelled,
-    Panicked,
+    TimedOut,
+    Failed(io::Error),
+    Data(JobData),
+}
+
+#[derive(Debug)]
+pub enum JobResult {
+    Done(JobOutcome),
+    Panicked
+}
+
+pub struct JobMsg {
+    pub id: JobId,
+    pub result: JobResult,
+    pub elapsed: Duration
 }
 
 #[derive(Clone)]
@@ -40,7 +49,6 @@ pub struct JobSubscribe {
 
 pub struct Job {
     id: JobId,
-    started: Instant,
     cancel: Arc<EventFd>,
 }
 
@@ -55,14 +63,16 @@ pub struct JobList {
 pub struct JobGuard {
     id: JobId,
     publish: JobPublish,
+    started: Instant,
     sent: bool,
 }
 
 impl JobGuard {
-    pub fn finish(mut self, outcome: JobOutcome) -> io::Result<()> {
+    pub fn finish(mut self, result: JobResult) -> io::Result<()> {
         if let Err(e) = self.publish.tx.send(JobMsg {
             id: self.id,
-            outcome,
+            result,
+            elapsed: self.started.elapsed()
         }) {
             return Err(io::Error::other(format!(
                 "failed to send JobMsg to receiver: {}",
@@ -80,7 +90,8 @@ impl Drop for JobGuard {
         if !self.sent {
             _ = self.publish.tx.send(JobMsg {
                 id: self.id,
-                outcome: JobOutcome::Panicked,
+                result: JobResult::Panicked,
+                elapsed: self.started.elapsed()
             });
             _ = self.publish.event.signal();
         }
@@ -114,11 +125,11 @@ impl JobList {
         let id = self.next_id;
         let job = Job {
             id,
-            started: Instant::now(),
             cancel: cancel_ev,
         };
 
         let guard_publish = self.publish.clone();
+        let started = Instant::now();
         thread::Builder::new()
             .name(format!("{name}-{}", job.id))
             .spawn(move || {
@@ -126,9 +137,10 @@ impl JobList {
                     id,
                     publish: guard_publish,
                     sent: false,
+                    started: started
                 };
                 let outcome = body(&job_cancel);
-                _ = guard.finish(outcome);
+                _ = guard.finish(JobResult::Done(outcome));
             })?;
 
         if self.active.len() == MAX_JOBS {
@@ -160,25 +172,31 @@ impl JobList {
         }
     }
 
-    pub fn on_job_done(&mut self) -> io::Result<()> {
-        self.subscribe.event.drain()?;
+    pub fn reset_wait_event(&self) -> io::Result<u64> {
+        self.subscribe.event.drain()
+    }
+
+    pub fn try_next_done(&mut self) -> Option<JobMsg> {
         while let Ok(msg) = self.subscribe.rx.try_recv() {
             if let Some(j_idx) = self.active.iter().position(|j| j.id == msg.id) {
                 let job = self.active.remove(j_idx).unwrap();
                 log_debug!(
                     "Job {} completed with outcome {:?} in {:?}",
                     msg.id,
-                    msg.outcome,
-                    job.started.elapsed()
-                )
+                    msg.result,
+                    msg.elapsed
+                );
+
+                return Some(msg);
             } else if let Some(j_idx) = self.cancelling.iter().position(|j| j.id == msg.id) {
                 let job = self.cancelling.swap_remove(j_idx);
                 log_debug!(
                     "Job {} was cancelled and completed with outcome {:?} in {:?}",
                     msg.id,
-                    msg.outcome,
-                    job.started.elapsed()
-                )
+                    msg.result,
+                    msg.elapsed
+                );
+                return Some(msg);
             } else {
                 log_error!(
                     "Job Id {} was not found in neither the active nor the cancelling jobs list",
@@ -186,7 +204,8 @@ impl JobList {
                 );
             }
         }
-        Ok(())
+
+        None
     }
 }
 

@@ -1,9 +1,7 @@
 use std::{borrow::Cow, os::fd::OwnedFd};
 
 use crate::{
-    fd_io::InFdBuffer,
-    log_debug, parse_mime,
-    wl::{
+    fd_io::InFdBuffer, log_debug, mime_types::KNOWN_MIME_TYPES, parse_mime, wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
         wl_message_writer::WlMessageWriter,
@@ -30,25 +28,7 @@ pub enum DataControlOfferEvent<'a> {
     Offer { mime: &'a [u8] },
 }
 
-pub const TEXT_PLAIN_UTF8: &str = "text/plain;charset=utf-8";
-pub const UTF8_STRING: &str = "UTF8_STRING";
-pub const TEXT_PLAIN: &str = "text/plain";
-pub const STRING: &str = "STRING";
-pub const TEXT: &str = "TEXT";
-pub const TEXT_HTML: &str = "text/html";
-
-// Ordered by preference: index == rank.
-pub const KNOWN_MIME_TYPES: [&str; 6] = [
-    TEXT_PLAIN_UTF8,
-    UTF8_STRING,
-    TEXT_PLAIN,
-    STRING,
-    TEXT,
-    TEXT_HTML,
-];
 pub const MAX_OFFERED_MIME_TYPES: usize = 128;
-pub const OFFERED_TXT_MIME_TYPES: [&str; 5] =
-    [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
 
 pub struct WlDataControlOffer {
     id: u32,
@@ -65,27 +45,6 @@ impl WlDataControlOffer {
             id: local_id,
             offered_mime_types: Vec::with_capacity(8),
         }
-    }
-
-    pub fn preferred_mime_type(&self) -> Option<&Cow<'static, str>> {
-        let ranks = self
-            .offered_mime_types
-            .iter()
-            .map(|mime| {
-                KNOWN_MIME_TYPES.iter().position(|m| m == mime).map_or_else(
-                    || {
-                        if mime.contains("text") {
-                            (99, mime)
-                        } else {
-                            (999, mime)
-                        }
-                    },
-                    |rank| (rank, mime),
-                )
-            })
-            .min_by(|(rank_a, _), (rank_b, _)| rank_a.cmp(rank_b));
-
-        ranks.map(|(_, mime)| mime)
     }
 
     pub fn asked_mime_type(&self, asked: &str) -> Option<&Cow<'static, str>> {

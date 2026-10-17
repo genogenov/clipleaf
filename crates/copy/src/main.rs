@@ -10,8 +10,7 @@ use std::{
 };
 
 use clipleaf_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlSessionEvent, WlSessionManager, init_logging,
-    log_debug, log_error,
+    WlBufferedStream, WlSessionEvent, WlSessionManager, init_logging, log_debug, log_error, mime_types::{TXT_MIME_TYPES_FOR_OFFER, PREFERRED_TXT_MIME_TYPES},
 };
 
 use crate::{
@@ -76,7 +75,7 @@ fn run() -> io::Result<()> {
     if let Some(mime) = args.mime {
         data_source.offer(mgr.get_message_writer(), &mime)?;
     } else {
-        for mime in OFFERED_TXT_MIME_TYPES {
+        for mime in TXT_MIME_TYPES_FOR_OFFER {
             data_source.offer(mgr.get_message_writer(), mime)?;
         }
     }

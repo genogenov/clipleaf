@@ -1,19 +1,28 @@
 #![forbid(unsafe_code)]
 mod jobs;
+mod offers_fetch;
 
+use core::slice;
 use std::{
-    io::{self, Error},
+    borrow::Cow,
+    io::{self, Error, PipeReader, Read},
+    iter, mem,
     os::fd::AsFd,
     process::ExitCode,
+    time::{Duration, Instant},
 };
 
 use clipleaf_core::{
-    PollFd, WlBufferedStream, WlDataControlOffer, WlSessionEvent, WlSessionManager,
-    ffi::{POLLIN, POLLNVAL, POLLOUT},
-    init_logging, log_debug, log_error, log_info, poll,
+    EventFd, PollFd, PollResult, WlBufferedStream, WlDataControlOffer, WlSessionEvent,
+    WlSessionManager,
+    ffi::{POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT},
+    init_logging, log_debug, log_error, log_info, pick_fetch_mimes, poll,
 };
 
-use crate::jobs::{JobList, JobOutcome};
+use crate::{jobs::{JobData, JobList, JobOutcome, JobResult}, offers_fetch::start_fetch};
+
+const MAX_KNOWN_RETAINED_OFFERS: usize = 10;
+const FETCH_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn main() -> ExitCode {
     init_logging();
@@ -34,14 +43,6 @@ fn run() -> io::Result<()> {
 
     let mut jobs = JobList::new()?;
 
-    let job_id = jobs.start("tester job", |cancel| {
-        log_debug!("Log from inside job before sleep");
-        poll(&mut [PollFd::new(cancel.as_fd(), POLLIN)], None).unwrap();
-        log_debug!("Log from inside job after sleep");
-        JobOutcome::Cancelled
-    })?;
-
-    log_debug!("Scheduled Job {}", job_id);
     loop {
         session.flush()?; // one sendmsg per iteration
         let events = POLLIN
@@ -66,7 +67,21 @@ fn run() -> io::Result<()> {
             return Err(Error::other("job bell not open"));
         }
         if job_events & POLLIN != 0 {
-            jobs.on_job_done()?;
+            jobs.reset_wait_event()?;
+            while let Some(msg) = jobs.try_next_done() {
+                match msg.result {
+                    JobResult::Done(JobOutcome::Data(JobData::Fetch(fetch_result))) => {
+                        log_info!("job {}: {fetch_result:?} in {:?}", msg.id, msg.elapsed)
+                    }
+                    JobResult::Done(JobOutcome::Cancelled) => {
+                        log_debug!("job {} cancelled", msg.id)
+                    }
+                    JobResult::Done(JobOutcome::TimedOut) => {
+                        log_info!("job {}: source went silent, entry dropped", msg.id)
+                    }
+                    res => log_error!("job {} failed: {res:?}", msg.id), // Failed, Panicked
+                }
+            }
         }
 
         // POLLIN, POLLHUP, POLLERR: drain. HUP/ERR end in Err(UnexpectedEof) from the drain.
@@ -81,8 +96,9 @@ fn run() -> io::Result<()> {
             }
         }
         if changed_offer {
-            log_selection(session.get_offer());
-            jobs.cancel(job_id);
+            if let Err(e) = start_fetch(&mut session, &mut jobs, FETCH_IDLE_TIMEOUT) {
+                log_error!("Failed to start fetch offer job: {e}");
+            }
         }
         if changed_primary_offer {
             log_selection(session.get_primary_offer());
