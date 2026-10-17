@@ -144,7 +144,7 @@ impl JobList {
                     id,
                     publish: guard_publish,
                     sent: false,
-                    started: started,
+                    started,
                 };
                 let outcome = body(&job_cancel);
                 _ = guard.finish(JobResult::Done(outcome));
@@ -165,19 +165,19 @@ impl JobList {
         Ok(id)
     }
 
-    pub fn cancel(&mut self, id: JobId) {
-        if let Some(j_idx) = self.active.iter().position(|j| j.id == id)
-            && let Some(job) = self.active.remove(j_idx)
-        {
-            let id = job.id;
-            let cancel_res = job.cancel.signal();
-            self.cancelling.push(job);
-            if let Err(e) = cancel_res {
-                log_error!("Could not cancel job {} : {}", id, e);
-            }
-            log_debug!("Job {} was cancelled", id);
-        }
-    }
+    // pub fn cancel(&mut self, id: JobId) {
+    //     if let Some(j_idx) = self.active.iter().position(|j| j.id == id)
+    //         && let Some(job) = self.active.remove(j_idx)
+    //     {
+    //         let id = job.id;
+    //         let cancel_res = job.cancel.signal();
+    //         self.cancelling.push(job);
+    //         if let Err(e) = cancel_res {
+    //             log_error!("Could not cancel job {} : {}", id, e);
+    //         }
+    //         log_debug!("Job {} was cancelled", id);
+    //     }
+    // }
 
     pub fn reset_wait_event(&self) -> io::Result<u64> {
         self.subscribe.event.drain()

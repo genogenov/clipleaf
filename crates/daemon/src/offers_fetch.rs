@@ -36,7 +36,7 @@ pub fn start_fetch(
         let mut pipes = Vec::new();
         for mime in &mimes {
             let (rx, tx) = io::pipe()?;
-            session.receive_offer(false, Some(&mime), tx.into())?;
+            session.receive_offer(false, Some(mime), tx.into())?;
             pipes.push(rx);
         }
         jobs.start("fetch-selection", move |cancel| {
@@ -56,9 +56,9 @@ fn fetch(
     let cancel_poll = PollFd::new(cancel.as_fd(), POLLIN);
     let mut fetch_ops = mimes
         .into_iter()
-        .zip(pipes.into_iter())
+        .zip(pipes)
         .map(|(mime, pipe)| FetchOp {
-            mime: mime,
+            mime,
             pipe: Some(pipe),
             bytes: 0,
         })
