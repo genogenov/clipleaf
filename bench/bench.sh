@@ -113,7 +113,8 @@ measure() {
     { echo "hyperfine failed for $id:" >&2; tail -3 "$W/$id.err" >&2; exit 1; }
 }
 
-median_ms() { awk -F, 'NR == 2 { printf "%.2f", $4 * 1000 }' "$W/$1.csv"; }
+# By header name: hyperfine 1.x calls the column "median", 2.x "time_wall_clock_median" (column 4 became stddev).
+median_ms() { awk -F, 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "median" || $i == "time_wall_clock_median") c = i } NR == 2 { if (!c) exit 1; printf "%.2f", $c * 1000 }' "$W/$1.csv"; }
 
 median() { sort -n | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }'; }
 

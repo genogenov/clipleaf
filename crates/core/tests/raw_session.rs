@@ -646,3 +646,70 @@ fn object_ids_are_dense_and_reused_after_delete_id() {
     assert!(rig.session.try_next_event().unwrap().is_none());
     assert_eq!(rig.session.create_data_source().unwrap().local_id, a);
 }
+
+#[test]
+fn offers_anywhere_in_the_server_range_up_to_the_cap_are_tracked() {
+    // The server table grows on demand: the compositor picks the ids, not us.
+    for id in [SERVER_ID_START + 40_000, SERVER_ID_START + 0xffff] {
+        let mut rig = rig();
+        let mut events = new_offer(id, "text/plain");
+        events.extend(selection(id));
+        rig.peer().send(&events);
+
+        assert_eq!(
+            kinds(&drain_events(&mut rig.session)),
+            [("selection", Some(id))]
+        );
+        assert_eq!(
+            rig.session.get_offer().unwrap().offered_mime_types(),
+            ["text/plain"]
+        );
+    }
+}
+
+#[test]
+fn an_offer_id_past_the_cap_is_an_error() {
+    for id in [SERVER_ID_START + 0x1_0000, u32::MAX] {
+        let mut rig = rig();
+        rig.peer().send(&device_event(DEVICE_DATA_OFFER, id));
+        rig.peer().shutdown_write();
+        let err = err_of(rig.session.next_event());
+        assert_ne!(err.kind(), ErrorKind::UnexpectedEof, "{id:#x}: {err}");
+    }
+}
+
+#[test]
+fn a_new_offer_reusing_the_id_of_a_live_offer_is_an_error() {
+    // Only we destroy offers, so a live id announced again means the compositor is broken.
+    let mut rig = rig();
+    let mut events = new_offer(OFFER_A, "text/plain");
+    events.extend(selection(OFFER_A));
+    events.extend(device_event(DEVICE_DATA_OFFER, OFFER_A));
+    rig.peer().send(&events);
+    rig.peer().shutdown_write();
+
+    assert_eq!(
+        kinds(&[rig.session.next_event().unwrap()]),
+        [("selection", Some(OFFER_A))]
+    );
+    let err = err_of(rig.session.next_event());
+    assert_ne!(err.kind(), ErrorKind::UnexpectedEof, "{err}");
+}
+
+#[test]
+fn events_for_the_reserved_id_or_an_unannounced_server_id_are_errors() {
+    // OFFER_C grows the server table past OFFER_B, which stays unannounced.
+    for (case, event) in [
+        // Shaped like an offer event, so only the id can make it an error.
+        ("reserved id 0", mime_offer(0, "text/plain")),
+        ("unannounced server id", mime_offer(OFFER_B, "text/plain")),
+    ] {
+        let mut rig = rig();
+        let mut events = new_offer(OFFER_C, "text/plain");
+        events.extend(event);
+        rig.peer().send(&events);
+        rig.peer().shutdown_write();
+        let err = err_of(rig.session.next_event());
+        assert_ne!(err.kind(), ErrorKind::UnexpectedEof, "{case}: {err}");
+    }
+}

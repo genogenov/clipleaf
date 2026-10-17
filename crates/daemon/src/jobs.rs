@@ -221,3 +221,114 @@ impl AsFd for JobList {
         self.subscribe.event.as_fd()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::PipeReader;
+
+    use clipleaf_core::{PollFd, PollResult, ffi::POLLIN, poll};
+
+    use super::*;
+
+    /// The next finished job, the way the main loop gets it: what is already queued first,
+    /// then wait for the bell. The 10 s bound only turns a hang into a failure.
+    fn next_done(jobs: &mut JobList) -> JobMsg {
+        loop {
+            if let Some(msg) = jobs.try_next_done() {
+                return msg;
+            }
+            let mut fds = [PollFd::new(jobs.as_fd(), POLLIN)];
+            let result = poll(&mut fds, Some(Duration::from_secs(10))).unwrap();
+            assert!(matches!(result, PollResult::Ready(1)), "no job finished");
+            jobs.reset_wait_event().unwrap();
+        }
+    }
+
+    /// Waits until the job is cancelled or `release` is closed.
+    fn wait_for_cancel_or(cancel: &EventFd, release: &PipeReader) -> JobOutcome {
+        let mut fds = [
+            PollFd::new(cancel.as_fd(), POLLIN),
+            PollFd::new(release.as_fd(), POLLIN),
+        ];
+        poll(&mut fds, None).unwrap();
+        if fds[0].revents() & POLLIN != 0 {
+            JobOutcome::Cancelled
+        } else {
+            JobOutcome::Data(JobData::Fetch(Vec::new()))
+        }
+    }
+
+    #[test]
+    fn a_finished_job_rings_the_bell_and_hands_over_its_result_once() {
+        let mut jobs = JobList::new().unwrap();
+        let id = jobs
+            .start("test", |_| {
+                JobOutcome::Data(JobData::Fetch(vec![("text/plain".into(), 5)]))
+            })
+            .unwrap();
+
+        let msg = next_done(&mut jobs);
+        assert_eq!(msg.id, id);
+        let JobResult::Done(JobOutcome::Data(JobData::Fetch(types))) = msg.result else {
+            panic!("{:?}", msg.result);
+        };
+        assert_eq!(types, [("text/plain".into(), 5)]);
+        assert!(jobs.try_next_done().is_none());
+    }
+
+    #[test]
+    fn a_job_that_panics_is_reported_as_panicked() {
+        let mut jobs = JobList::new().unwrap();
+        let id = jobs
+            .start("test", |_| -> JobOutcome {
+                panic!("job panics on purpose")
+            })
+            .unwrap();
+
+        let msg = next_done(&mut jobs);
+        assert_eq!(msg.id, id);
+        assert!(
+            matches!(msg.result, JobResult::Panicked),
+            "{:?}",
+            msg.result
+        );
+    }
+
+    #[test]
+    fn starting_one_job_too_many_cancels_the_oldest_and_the_rest_keep_running() {
+        let mut jobs = JobList::new().unwrap();
+        let (release, release_all) = io::pipe().unwrap();
+        let ids: Vec<JobId> = (0..=MAX_JOBS)
+            .map(|_| {
+                let release = release.try_clone().unwrap();
+                jobs.start("test", move |cancel| wait_for_cancel_or(cancel, &release))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(ids, (0..=MAX_JOBS as JobId).collect::<Vec<_>>());
+
+        // Nothing else can finish before the release, so the first message is the oldest job.
+        let msg = next_done(&mut jobs);
+        assert_eq!(msg.id, ids[0]);
+        assert!(
+            matches!(msg.result, JobResult::Done(JobOutcome::Cancelled)),
+            "{:?}",
+            msg.result
+        );
+
+        drop(release_all);
+        let mut finished: Vec<JobId> = (0..MAX_JOBS)
+            .map(|_| {
+                let msg = next_done(&mut jobs);
+                assert!(
+                    matches!(msg.result, JobResult::Done(JobOutcome::Data(_))),
+                    "{:?}",
+                    msg.result
+                );
+                msg.id
+            })
+            .collect();
+        finished.sort_unstable();
+        assert_eq!(finished, ids[1..]);
+    }
+}
