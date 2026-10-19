@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
+mod index;
 mod jobs;
 mod offers_fetch;
+mod storage;
 
 use std::{
     io::{self, Error},
@@ -18,9 +20,11 @@ use clipleaf_core::{
 use crate::{
     jobs::{JobData, JobList, JobOutcome, JobResult},
     offers_fetch::start_fetch,
+    storage::FsDataStore,
 };
 
 const FETCH_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_HISTORY_LIMIT: usize = 100;
 
 fn main() -> ExitCode {
     init_logging();
@@ -35,6 +39,12 @@ fn main() -> ExitCode {
 }
 
 fn run() -> io::Result<()> {
+    let mut store = FsDataStore::open_data_store_dir(None)?;
+    store.lock()?;
+    store.clear_payloads()?;
+    let (index_tx, _snapshot) = index::spawn_index(MAX_HISTORY_LIMIT)?;
+    let mut seq_counter: u64 = 1;
+
     let mut stream = WlBufferedStream::connect_from_env()?;
     stream.set_nonblocking_writes();
     let mut session = WlSessionManager::initialize(stream)?;
@@ -98,9 +108,17 @@ fn run() -> io::Result<()> {
         }
         if changed_offer {
             log_selection(session.get_offer());
-            if let Err(e) = start_fetch(&mut session, &mut jobs, FETCH_IDLE_TIMEOUT) {
+            if let Err(e) = start_fetch(
+                &mut session,
+                &mut jobs,
+                FETCH_IDLE_TIMEOUT,
+                seq_counter,
+                store.payloads_dir(),
+                index_tx.clone(),
+            ) {
                 log_error!("Failed to start fetch offer job: {e}");
             }
+            seq_counter = seq_counter.wrapping_add(1);
         }
         if changed_primary_offer {
             log_selection(session.get_primary_offer());

@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 clipleaf-core = { path = "../core" }
+xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
 
 [dev-dependencies]
 clipleaf-test-common = { path = "../tests-common" }

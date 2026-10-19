@@ -51,6 +51,8 @@ impl Daemon {
         let mut child = Command::new(env!("CARGO_BIN_EXE_clipleafd"))
             .env_clear()
             .env("WAYLAND_DISPLAY", comp.path())
+            // A fresh state dir inside the compositor's private dir, removed with it.
+            .env("XDG_STATE_HOME", comp.path().with_file_name("state"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

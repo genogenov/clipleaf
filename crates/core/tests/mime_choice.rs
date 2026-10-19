@@ -5,10 +5,13 @@ use clipleaf_core::{pick_best_mime, pick_fetch_mimes};
 
 fn fetch(offered: &[&'static str]) -> Vec<&'static str> {
     pick_fetch_mimes(offered, 10)
+        .iter()
+        .map(|m| *m.mime())
+        .collect()
 }
 
 fn best(offered: &[&'static str]) -> Option<&'static str> {
-    pick_best_mime(offered).copied()
+    pick_best_mime(offered).map(|m| **m.mime())
 }
 
 #[test]
@@ -78,7 +81,11 @@ fn nothing_known_means_nothing_fetched_and_the_cap_is_honored() {
     assert!(fetch(&["application/x-foo", "chromium/x-web-custom-data"]).is_empty());
     assert!(fetch(&[]).is_empty());
     let offered = ["text/plain", "image/png", "text/uri-list"];
-    assert_eq!(pick_fetch_mimes(&offered, 2), ["text/plain", "image/png"]);
+    let picked: Vec<&str> = pick_fetch_mimes(&offered, 2)
+        .iter()
+        .map(|m| *m.mime())
+        .collect();
+    assert_eq!(picked, ["text/plain", "image/png"]);
 }
 
 #[test]

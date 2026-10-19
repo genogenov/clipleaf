@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{log_debug, mime_types::KDE_PASSWDMANAGER_HINT};
 
 pub mod types {
@@ -54,77 +56,168 @@ pub mod types {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum MimeKind {
-    Text(usize),
-    TextLike(usize),
-    /// Text in an encoding a terminal can't show (UTF-16): ranked below HTML and other `text/` types.
+    Text,
+    TextLike,
     TextExtended,
-    FileList(usize),
-    Image(usize),
+    FileList,
+    Image,
     Other,
     Password,
+}
+
+#[derive(Debug)]
+pub struct Mime<T: AsRef<str>> {
+    rank: Option<usize>,
+    kind: MimeKind,
+    mime: T,
+}
+
+impl<T: AsRef<str>> Mime<T> {
+    pub fn is_preferred<U: AsRef<str>>(&self, other: &Mime<U>) -> bool {
+        matches!(self.cmp_with(other), Ordering::Less)
+    }
+
+    pub fn new(mime: T, kind: MimeKind, rank: Option<usize>) -> Self {
+        Self { kind, mime, rank }
+    }
+
+    pub fn mime(&self) -> &T {
+        &self.mime
+    }
+
+    pub fn kind(&self) -> MimeKind {
+        self.kind
+    }
+
+    pub fn cmp_with<U: AsRef<str>>(&self, other: &Mime<U>) -> Ordering {
+        self.kind.cmp(&other.kind).then(self.rank.cmp(&other.rank))
+    }
+}
+
+impl<T> Mime<&T>
+where
+    T: AsRef<str> + Clone,
+{
+    pub fn as_cloned_mime(&self) -> Mime<T> {
+        Mime {
+            kind: self.kind,
+            mime: self.mime.clone(),
+            rank: self.rank,
+        }
+    }
 }
 
 fn position(list: &[&str], m: &str) -> Option<usize> {
     list.iter().position(|p| *p == m)
 }
 
-pub fn classify_mime(m: &str) -> MimeKind {
-    if let Some(r) = position(&types::TEXT_MIME_TYPES, m) {
-        MimeKind::Text(r)
-    } else if let Some(r) = position(&types::PREFERRED_TXT_LIKE_MIME_TYPES, m) {
-        MimeKind::TextLike(r)
-    } else if let Some(r) = position(&types::PREFERRED_FILE_LIST_MIME_TYPES, m) {
-        MimeKind::FileList(r)
-    } else if let Some(r) = position(&types::PREFERRED_IMAGE_MIME_TYPES, m) {
-        MimeKind::Image(r)
-    } else if m == types::TEXT_PLAIN_UTF16 {
-        MimeKind::TextExtended
-    } else if m == KDE_PASSWDMANAGER_HINT {
-        MimeKind::Password
-    } else if m.starts_with("text/") {
-        MimeKind::TextLike(types::PREFERRED_TXT_LIKE_MIME_TYPES.len())
-    } else if m.starts_with("image/") {
-        MimeKind::Image(types::PREFERRED_IMAGE_MIME_TYPES.len())
+pub fn classify_mime<S>(m: S) -> Mime<S>
+where
+    S: AsRef<str>,
+{
+    let str = m.as_ref();
+    if let Some(r) = position(&types::TEXT_MIME_TYPES, str) {
+        Mime {
+            kind: MimeKind::Text,
+            rank: Some(r),
+            mime: m,
+        }
+    } else if let Some(r) = position(&types::PREFERRED_TXT_LIKE_MIME_TYPES, str) {
+        Mime {
+            kind: MimeKind::TextLike,
+            rank: Some(r),
+            mime: m,
+        }
+    } else if let Some(r) = position(&types::PREFERRED_FILE_LIST_MIME_TYPES, str) {
+        Mime {
+            kind: MimeKind::FileList,
+            rank: Some(r),
+            mime: m,
+        }
+    } else if let Some(r) = position(&types::PREFERRED_IMAGE_MIME_TYPES, str) {
+        Mime {
+            kind: MimeKind::Image,
+            rank: Some(r),
+            mime: m,
+        }
+    } else if str == types::TEXT_PLAIN_UTF16 {
+        Mime {
+            kind: MimeKind::TextExtended,
+            rank: None,
+            mime: m,
+        }
+    } else if str == KDE_PASSWDMANAGER_HINT {
+        Mime {
+            kind: MimeKind::Password,
+            rank: None,
+            mime: m,
+        }
+    } else if str.starts_with("text/") {
+        Mime {
+            kind: MimeKind::TextLike,
+            rank: Some(types::PREFERRED_TXT_LIKE_MIME_TYPES.len()),
+            mime: m,
+        }
+    } else if str.starts_with("image/") {
+        Mime {
+            kind: MimeKind::Image,
+            rank: Some(types::PREFERRED_IMAGE_MIME_TYPES.len()),
+            mime: m,
+        }
     } else {
-        MimeKind::Other
+        Mime {
+            kind: MimeKind::Other,
+            rank: None,
+            mime: m,
+        }
     }
 }
 
-pub fn pick_best_mime<S: AsRef<str>>(mimes: &[S]) -> Option<&S> {
+pub fn pick_best_mime<S: AsRef<str>>(mimes: &[S]) -> Option<Mime<&S>> {
     mimes
         .iter()
-        .map(|m| (classify_mime(m.as_ref()), m))
-        .filter(|(k, _)| *k != MimeKind::Password)
-        .min_by_key(|(k, _)| *k)
-        .map(|(_, m)| m)
+        .map(classify_mime)
+        .filter(|k| k.kind != MimeKind::Password)
+        .min_by(|a, b| a.cmp_with(b))
 }
 
-pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) -> Vec<S> {
-    let (mut alias, mut image) = (None::<(MimeKind, usize)>, None::<(MimeKind, usize)>);
+pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) -> Vec<Mime<S>> {
+    let (mut alias, mut image) = (None::<Mime<&S>>, None::<Mime<&S>>);
     let mut files = Vec::new();
     // let mut rest = Vec::new();
-    for (i, m) in mimes.iter().enumerate() {
-        match classify_mime(m.as_ref()) {
-            MimeKind::Password => return Vec::new(),
-            k @ (MimeKind::Text(_) | MimeKind::TextLike(_) | MimeKind::TextExtended)
-                if alias.is_none_or(|(b, _)| k < b) =>
+    for m in mimes.iter() {
+        match classify_mime(m) {
+            Mime {
+                kind: MimeKind::Password,
+                ..
+            } => return Vec::new(),
+            k @ Mime { kind, .. }
+                if (kind == MimeKind::Text
+                    || kind == MimeKind::TextLike
+                    || kind == MimeKind::TextExtended)
+                    && alias.as_ref().is_none_or(|a| k.is_preferred(a)) =>
             {
-                alias = Some((k, i))
+                alias = Some(k)
             }
-            k @ MimeKind::Image(_) if image.is_none_or(|(b, _)| k < b) => image = Some((k, i)),
-            MimeKind::FileList(_) => files.push(i),
+            k @ Mime { kind, .. }
+                if kind == MimeKind::Image && image.as_ref().is_none_or(|b| k.is_preferred(b)) =>
+            {
+                image = Some(k)
+            }
+            k @ Mime {
+                kind: MimeKind::FileList,
+                ..
+            } => files.push(k),
             // MimeKind::Other => rest.push(i),
             _ => {} // a lower-ranked alias or image
         }
     }
-    let result: Vec<S> = alias
+    let result: Vec<Mime<S>> = alias
         .into_iter()
         .chain(image)
-        .map(|(_, i)| i)
         .chain(files)
         .take(cap_known)
-        // .chain(rest)
-        .map(|i| mimes[i].clone())
+        .map(|m| m.as_cloned_mime())
         .collect();
 
     log_debug!("Picked {} fetch MIMEs out of {}", result.len(), mimes.len());

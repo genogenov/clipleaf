@@ -375,7 +375,7 @@ impl WlSessionManager {
         );
 
         let Some(preferred_mime) = preferred_mime.as_ref().map_or_else(
-            || pick_best_mime(offer.offered_mime_types()),
+            || pick_best_mime(offer.offered_mime_types()).map(|m| *m.mime()),
             |s| offer.asked_mime_type(s),
         ) else {
             return Ok(None);

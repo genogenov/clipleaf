@@ -480,7 +480,9 @@ fn a_burst_right_after_bind_is_routed_per_offer_and_tracks_both_selections() {
         ["text/html", "text/plain;charset=utf-8"]
     );
     assert_eq!(
-        pick_best_mime(offer.offered_mime_types()).map(|m| m.as_ref()),
+        pick_best_mime(offer.offered_mime_types())
+            .map(|m| m.mime().to_string())
+            .as_deref(),
         Some("text/plain;charset=utf-8")
     );
     let primary = rig.session.get_primary_offer().unwrap();
@@ -590,7 +592,8 @@ fn the_preferred_type_is_the_best_known_text_then_other_text_then_the_first() {
         events.extend(selection(OFFER_A));
         rig.peer().send(&events);
         rig.session.next_event().unwrap();
-        pick_best_mime(rig.session.get_offer().unwrap().offered_mime_types()).map(|m| m.to_string())
+        pick_best_mime(rig.session.get_offer().unwrap().offered_mime_types())
+            .map(|m| m.mime().to_string())
     };
     assert_eq!(
         preferred(&["text/html", "STRING", "UTF8_STRING", "image/png"]).as_deref(),

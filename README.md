@@ -117,7 +117,7 @@ For debug output, build without `--release`, run the binaries from `./target/deb
 
 ## How it works
 
-- **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. The history daemon and the UIs use crates where they pay off (SQLite, image decoding, ratatui, GTK).
+- **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. The history daemon and the UIs use crates where they pay off (hashing, image thumbnails, ratatui, GTK).
 - **Hand-written Wayland wire protocol** over the Unix socket: message framing, object id routing, and file descriptor passing (`SCM_RIGHTS`) through hand-written `sendmsg`/`recvmsg` bindings.
 - **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `splice`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
 - **No helper processes**: `copy` and `paste` read, serve and receive the data themselves without starting other programs, which keeps small copies and pastes fast.
