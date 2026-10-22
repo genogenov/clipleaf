@@ -18,7 +18,7 @@ use clipleaf_core::{log_debug, log_error, log_info, log_warn};
 use crate::{
     index::Item,
     storage::{
-        Entry, entry,
+        Data, Entry, entry,
         wal::{
             encoder::{
                 HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreRecord, decode_header,
@@ -346,6 +346,11 @@ impl WriteAheadLog {
             record.entry.id,
             record.seq
         );
+
+        // skip encode append if syncing fails - no history storage.
+        log_debug!("syncing entry payload files..");
+        self.sync_payload_files(record)?;
+
         let len = encode_append(record, self.header.salt, buf).map_err(io::Error::other)?;
         self.log_file.write_all(&buf[..len])?;
         self.last_good_len += len as u64;
@@ -376,6 +381,16 @@ impl WriteAheadLog {
 
         self.last_good_len += len as u64;
         log_debug!("Processed WAL touch - written {} bytes", len);
+        Ok(())
+    }
+
+    fn sync_payload_files(&self, record: &Item) -> io::Result<()> {
+        for f in record.entry.types.iter().filter_map(|t| match t.data {
+            Data::File(ref f) => Some(f),
+            _ => None,
+        }) {
+            File::open(f.payload_path(&self.payloads))?.sync_data()?
+        }
         Ok(())
     }
 }
