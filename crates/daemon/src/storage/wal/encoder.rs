@@ -1,11 +1,11 @@
-use std::{borrow::Cow, path::Path, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
-use clipleaf_core::{Mime, classify_mime, log_debug, log_error};
+use clipleaf_core::{classify_mime, log_debug, log_error};
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
 use crate::{
     index::Item,
-    storage::{Data, Entry, MAX_FETCHED_TYPES, PayloadFile, TypeData, wal::error::WalError},
+    storage::{Data, MAX_FETCHED_TYPES, PayloadFile, TypeData, wal::error::WalError},
 };
 
 pub const IDENTIFIER: [u8; 14] = *b"CLIPLEAF WAL\0\0";
@@ -75,10 +75,7 @@ pub fn decode_header(buff: &[u8]) -> Result<Header, WalError> {
     let (salt, rest) = read_u64(rest)?;
     let (seq_snapshot, _) = read_u64(rest)?;
 
-    Ok(Header {
-        salt: salt,
-        seq_snapshot: seq_snapshot,
-    })
+    Ok(Header { salt, seq_snapshot })
 }
 
 /// encoded as len, type, id, seq, time, pinned, entry count, [entry], checksum
@@ -128,11 +125,11 @@ pub fn encode_delete(id: u64, salt: u64, buff: &mut [u8]) -> Result<usize, WalEr
 }
 
 pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), WalError> {
-    let (len, rest) = read_u32(buff)?;
+    let (len, _rest) = read_u32(buff)?;
 
     log_debug!("Checking len field.. {}, {}", len, buff.len());
     // len needs to be at least size(u32) + size(u8) for len + type
-    if len < 5 || len > MAX_RECORD_LEN || buff.len() < 8 + len as usize {
+    if !(5..=MAX_RECORD_LEN).contains(&len) || buff.len() < 8 + len as usize {
         return Err(WalError::Corrupted);
     }
 
@@ -186,9 +183,9 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
                 RestoreRecord::Insert(RestoreItem {
                     seq,
                     time_ms,
-                    pinned: pinned,
-                    id: id,
-                    types: types,
+                    pinned,
+                    id,
+                    types,
                 }),
             ))
         }
@@ -245,10 +242,10 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
         offset as usize,
         &buff[offset as usize..],
         TypeData {
-            data: data,
+            data,
             mime: classify_mime(mime),
-            hash: hash,
-            size: size,
+            hash,
+            size,
         },
     ))
 }
@@ -260,18 +257,14 @@ fn encode_stored_type_data(
     buff: &mut [u8],
 ) -> Result<usize, WalError> {
     let original = *offset;
-    log_debug!("mime len: {}", t.mime.mime().as_bytes().len());
-    encode_with_size_check(
-        offset,
-        buff,
-        &(t.mime.mime().as_bytes().len() as u32).to_le_bytes(),
-    )?;
+    log_debug!("mime len: {}", t.mime.mime().len());
+    encode_with_size_check(offset, buff, &(t.mime.mime().len() as u32).to_le_bytes())?;
     encode_with_size_check(offset, buff, t.mime.mime().as_bytes())?;
     encode_with_size_check(offset, buff, &t.size.to_le_bytes())?;
     encode_with_size_check(offset, buff, &t.hash.to_le_bytes())?;
 
     let (has_file, file_seq, head) = match t.data {
-        crate::storage::Data::Inline(ref head) => (0u8, 0 as usize, Some(head.clone())),
+        crate::storage::Data::Inline(ref head) => (0u8, 0_usize, Some(head.clone())),
         crate::storage::Data::File(ref payload_file) => {
             (1u8, payload_file.seqnum, payload_file.head.clone())
         }

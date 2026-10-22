@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display, str};
+use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub enum WalError {

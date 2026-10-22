@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::{self, DirBuilder, File, OpenOptions},
+    fs::{DirBuilder, File, OpenOptions},
     io::{self},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -73,23 +73,9 @@ impl FsDataStore {
         self.base.join("wal.log")
     }
 
-    pub fn base_dir(&self) -> &Path {
-        &self.base
-    }
-
-    pub fn clear_payloads(&self) -> io::Result<()> {
-        for entry in fs::read_dir(&self.payloads)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                fs::remove_dir_all(path)?;
-            } else {
-                fs::remove_file(path)?;
-            }
-        }
-
-        Ok(())
-    }
+    // pub fn base_dir(&self) -> &Path {
+    //     &self.base
+    // }
 }
 
 fn default_base() -> Option<PathBuf> {

@@ -1,10 +1,9 @@
 use std::{
-    cmp::max,
+    cmp::{self, max},
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     hash::{BuildHasher, Hasher, RandomState},
     io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
-    mem,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::{
@@ -44,7 +43,7 @@ pub struct Restored {
 
 pub struct WriteAheadLog {
     log_file: File,
-    wal_path: PathBuf,
+    // wal_path: PathBuf,
     payloads: Arc<Path>,
     header: Header,
     last_good_len: u64,
@@ -100,9 +99,9 @@ impl WriteAheadLog {
         }?;
         let pos = file.stream_position()?;
         Ok(Self {
-            wal_path: wal_path,
+            // wal_path: wal_path,
             log_file: file,
-            payloads: payloads.into(),
+            payloads,
             header,
             last_good_len: pos,
         })
@@ -230,15 +229,15 @@ impl WriteAheadLog {
                     if let Err(e) = fs::remove_file(entry.path()) {
                         log_error!("Failed to remove file : {e}");
                     }
-                } else if ftype.is_dir() {
-                    if let Err(e) = fs::remove_dir_all(entry.path()) {
-                        log_error!("Failed to remove dir : {e}");
-                    }
+                } else if ftype.is_dir()
+                    && let Err(e) = fs::remove_dir_all(entry.path())
+                {
+                    log_error!("Failed to remove dir : {e}");
                 }
             }
         }
 
-        sorted.sort_unstable_by(|a, b| b.seq.cmp(&a.seq));
+        sorted.sort_unstable_by_key(|a| cmp::Reverse(a.seq));
 
         let mut by_key = HashMap::with_capacity(len);
         let mut items = Vec::with_capacity(len);
@@ -255,7 +254,7 @@ impl WriteAheadLog {
 
         log_debug!("Restored {} entries.", items.len());
         Ok(Restored {
-            items: items,
+            items,
             by_key,
             next_seq: max(self.header.seq_snapshot, next_seq),
         })
@@ -304,7 +303,7 @@ impl WriteAheadLog {
 
     fn handle_msg(
         &mut self,
-        write_buf: &mut Vec<u8>,
+        write_buf: &mut [u8],
         has_pending_trim: &mut bool,
         msg: LogMsg,
     ) -> Result<(), io::Error> {
@@ -332,23 +331,22 @@ impl WriteAheadLog {
         self.log_file.set_len(self.last_good_len).is_ok()
     }
 
-    fn append(&mut self, record: &Item, buf: &mut Vec<u8>) -> io::Result<()> {
+    fn append(&mut self, record: &Item, buf: &mut [u8]) -> io::Result<()> {
         log_debug!(
             "Processing WAL append entry id {}, seq: {}",
             record.entry.id,
             record.seq
         );
-        let len = encode_append(&record, self.header.salt, buf).map_err(|e| io::Error::other(e))?;
+        let len = encode_append(record, self.header.salt, buf).map_err(io::Error::other)?;
         self.log_file.write_all(&buf[..len])?;
         self.last_good_len += len as u64;
         log_debug!("Processed WAL append - written {} bytes", len);
         Ok(())
     }
 
-    fn delete(&mut self, entry: &Item, buf: &mut Vec<u8>) -> Result<(), io::Error> {
+    fn delete(&mut self, entry: &Item, buf: &mut [u8]) -> Result<(), io::Error> {
         log_debug!("Processing WAL delete..");
-        let len = encode_delete(entry.entry.id, self.header.salt, buf)
-            .map_err(|e| io::Error::other(e))?;
+        let len = encode_delete(entry.entry.id, self.header.salt, buf).map_err(io::Error::other)?;
         let res = self.log_file.write_all(&buf[..len]);
 
         if res.is_ok() {

@@ -2,10 +2,8 @@ use std::{
     cmp::max,
     collections::HashMap,
     io, mem,
-    ops::Deref,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
-        atomic::AtomicBool,
         mpsc::{self, Receiver, Sender},
     },
     thread,
@@ -164,7 +162,7 @@ pub fn spawn_index(
         current,
         history_count_limit,
         shared: handle.clone(),
-        pinned_count: pinned_count,
+        pinned_count,
         log_sender: log_tx,
     };
     thread::Builder::new()

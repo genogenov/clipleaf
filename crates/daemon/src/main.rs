@@ -23,7 +23,7 @@ use crate::{
     offers_fetch::start_fetch,
     storage::{
         FsDataStore,
-        wal::log::{self, LogMsg, Restored, WriteAheadLog},
+        wal::log::{LogMsg, Restored, WriteAheadLog},
     },
 };
 

@@ -3,8 +3,8 @@ use std::{
     fmt::Debug,
     fs::{self},
     mem,
-    path::{Path, PathBuf},
-    sync::{Arc, atomic::AtomicBool},
+    path::Path,
+    sync::Arc,
 };
 
 use clipleaf_core::{Mime, MimeKind, log_error, mime_types::TEXT_PLAIN};
@@ -106,7 +106,7 @@ impl Entry {
             types,
             committed: true,
             pending_types: Vec::default(),
-            payloads_dir: payloads_dir,
+            payloads_dir,
         }
     }
 
@@ -117,14 +117,14 @@ impl Entry {
     pub fn drop_files(&self) {
         for t in self.types.iter().chain(self.pending_types.iter().flatten()) {
             if let Data::File(f) = &t.data
-                && let Err(e) = fs::remove_file(&f.payload_path(&self.payloads_dir))
+                && let Err(e) = fs::remove_file(f.payload_path(&self.payloads_dir))
             {
                 log_error!("Could not delete file on etry drop: {}", e);
             }
         }
     }
 
-    pub fn compute_key(types: &Vec<TypeData>) -> u128 {
+    pub fn compute_key(types: &[TypeData]) -> u128 {
         let mut hasher = Xxh3::new();
         let mut sorted: Vec<&TypeData> = types.iter().by_ref().collect();
         sorted.sort_unstable_by(|a, b| {

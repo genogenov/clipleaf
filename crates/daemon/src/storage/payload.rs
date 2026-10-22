@@ -125,7 +125,7 @@ impl PayloadFile {
     pub fn create_write(dir: &Path, id: u64, seqnum: usize) -> io::Result<(Self, File)> {
         let paylad = Self {
             head: None,
-            seqnum: seqnum,
+            seqnum,
             id,
         };
 
