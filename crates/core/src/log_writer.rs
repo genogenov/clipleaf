@@ -72,6 +72,7 @@ const PLAIN: Colors = Colors {
 pub struct LogWriter {
     pub colors: Colors,
     info_prefix: &'static str,
+    warn_prefix: &'static str,
     error_prefix: &'static str,
     debug_prefix: &'static str,
 }
@@ -103,6 +104,7 @@ impl LogWriter {
         Self {
             colors: if colored { ANSI } else { PLAIN },
             info_prefix: pick(concat!(bold!(), green!(), "info:", reset!()), "info:"),
+            warn_prefix: pick(concat!(bold!(), yellow!(), "warn:", reset!()), "warn:"),
             error_prefix: pick(concat!(bold!(), red!(), "error:", reset!()), "error:"),
             debug_prefix: pick(concat!(bold!(), cyan!(), "debug:", reset!()), "debug:"),
         }
@@ -110,6 +112,10 @@ impl LogWriter {
 
     pub fn info(&self, args: fmt::Arguments<'_>) {
         Self::write_line(self.info_prefix, args);
+    }
+
+    pub fn warn(&self, args: fmt::Arguments<'_>) {
+        Self::write_line(self.warn_prefix, args);
     }
 
     pub fn error(&self, args: fmt::Arguments<'_>) {
@@ -132,6 +138,13 @@ impl LogWriter {
 macro_rules! log_info {
     ($($arg:tt)*) => {
         $crate::LOGGER.info(format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! log_warn {
+    ($($arg:tt)*) => {
+        $crate::LOGGER.warn(format_args!($($arg)*))
     };
 }
 

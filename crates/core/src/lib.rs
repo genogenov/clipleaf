@@ -29,5 +29,8 @@ pub use wl::{
 pub use event_fd::EventFd;
 pub use fd_io::{serve_bytes, serve_file};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
-pub use mime::{Mime, MimeKind, parse_mime, pick_best_mime, pick_fetch_mimes, types as mime_types};
+pub use mime::{
+    Mime, MimeKind, classify_mime, parse_mime, pick_best_mime, pick_fetch_mimes,
+    types as mime_types,
+};
 pub use poll::{PollFd, PollResult, poll};
