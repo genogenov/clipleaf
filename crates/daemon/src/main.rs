@@ -8,6 +8,7 @@ use std::{
     io::{self, Error},
     os::fd::AsFd,
     process::ExitCode,
+    sync::mpsc::Sender,
     time::Duration,
 };
 
@@ -20,7 +21,10 @@ use clipleaf_core::{
 use crate::{
     jobs::{JobData, JobList, JobOutcome, JobResult},
     offers_fetch::start_fetch,
-    storage::FsDataStore,
+    storage::{
+        FsDataStore,
+        wal::log::{self, LogMsg, Restored, WriteAheadLog},
+    },
 };
 
 const FETCH_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -38,12 +42,33 @@ fn main() -> ExitCode {
     }
 }
 
+fn init_wal(store: &FsDataStore, seq_counter: &mut u64) -> io::Result<(Sender<LogMsg>, Restored)> {
+    log_debug!("Opening WAL file..");
+    let mut log = WriteAheadLog::open(store.wal_dir(), store.payloads_dir())?;
+    log_debug!("Initiating WAL restore..");
+    let restored = log.restore()?;
+    *seq_counter = restored.next_seq;
+    log_debug!("Spawning WAL..");
+    let log_tx = log.start()?;
+    Ok((log_tx, restored))
+}
+
 fn run() -> io::Result<()> {
+    let mut seq_counter: u64 = 1;
     let mut store = FsDataStore::open_data_store_dir(None)?;
     store.lock()?;
-    store.clear_payloads()?;
-    let (index_tx, _snapshot) = index::spawn_index(MAX_HISTORY_LIMIT)?;
-    let mut seq_counter: u64 = 1;
+
+    let (log_tx, restored) = match init_wal(&store, &mut seq_counter) {
+        Ok(it) => it,
+        Err(err) => {
+            return Err(io::Error::new(
+                err.kind(),
+                format!("Failed to span WAL: {}", err),
+            ));
+        }
+    };
+    log_debug!("Spawning index..");
+    let (index_tx, _snapshot) = index::spawn_index(MAX_HISTORY_LIMIT, log_tx, restored)?;
 
     let mut stream = WlBufferedStream::connect_from_env()?;
     stream.set_nonblocking_writes();

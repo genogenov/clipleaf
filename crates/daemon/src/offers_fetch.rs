@@ -4,7 +4,7 @@ use std::{
     iter,
     os::fd::AsFd,
     path::Path,
-    sync::mpsc::Sender,
+    sync::{Arc, mpsc::Sender},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -17,11 +17,8 @@ use clipleaf_core::{
 use crate::{
     index::IndexMsg,
     jobs::{JobData, JobList, JobOutcome},
-    storage::{EntryBuilder, PayloadWriter},
+    storage::{EntryBuilder, MAX_FETCHED_TYPES, PayloadWriter},
 };
-
-/// Upper bound on the types fetched per copy; the default pick yields at most 6 (text + image + 4 file lists).
-const MAX_FETCHED_TYPES: usize = 10;
 
 struct FetchOp {
     pipe: Option<PipeReader>,
@@ -33,7 +30,7 @@ pub fn start_fetch(
     jobs: &mut JobList,
     idle_timeout: Duration,
     id_seq: u64,
-    payloads_dir: &Path,
+    payloads_dir: Arc<Path>,
     index_tx: Sender<IndexMsg>,
 ) -> io::Result<()> {
     if let Some(mimes) = session
@@ -107,9 +104,9 @@ fn fetch(
                 // Every pipe reached EOF: a read error returns early (never partial).
                 let entry = entry.create();
                 let result: Vec<(Cow<'_, str>, u64)> = entry
-                    .types()
+                    .types
                     .iter()
-                    .map(|op| (op.mime().mime().clone(), op.size()))
+                    .map(|op| (op.mime.mime().clone(), op.size))
                     .collect();
 
                 if !result.is_empty()
@@ -254,7 +251,7 @@ mod tests {
             .collect()
     }
 
-    /// Runs one fetch into `dir`; returns the outcome and the entry sent to the index, if any.
+    // Runs one fetch into `dir`; returns the outcome and the entry sent to the index, if any.
     fn run(
         dir: &Dir,
         readers: Vec<PipeReader>,
@@ -263,7 +260,7 @@ mod tests {
         idle: Duration,
     ) -> (JobOutcome, Option<Entry>) {
         let (tx, rx): (Sender<IndexMsg>, Receiver<IndexMsg>) = mpsc::channel();
-        let entry = EntryBuilder::new(ID, &dir.0);
+        let entry = EntryBuilder::new(ID, Arc::from(dir.0.as_path()));
         let outcome = fetch((readers, mimes(names)), entry, cancel, idle, tx, ID, 0);
         let sent = rx
             .try_recv()
@@ -279,83 +276,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_type_is_read_to_its_end_in_fetch_order_and_only_large_types_get_a_file() {
-        let dir = Dir::new();
-        let (readers, mut writers) = sources(&["text/plain", "image/png"]);
-        let big = writers.pop().unwrap();
-        // More than a pipe holds, so the fetch has to read while the source writes.
-        let image = thread::spawn(move || {
-            let mut big = big;
-            big.write_all(&vec![7u8; 300 * 1024]).unwrap();
-        });
-        let mut text = writers.pop().unwrap();
-        text.write_all(b"hello").unwrap();
-        drop(text);
-
-        let cancel = EventFd::new().unwrap();
-        let (outcome, sent) = run(&dir, readers, &["text/plain", "image/png"], &cancel, IDLE);
-        image.join().unwrap();
-        assert_eq!(
-            fetched(outcome),
-            [("text/plain".into(), 5), ("image/png".into(), 300 * 1024)]
-        );
-        let entry = sent.expect("the entry goes to the index");
-        let types: Vec<_> = entry
-            .types()
-            .iter()
-            .map(|t| (t.mime().mime().to_string(), t.size()))
-            .collect();
-        assert_eq!(
-            types,
-            [
-                ("text/plain".to_string(), 5),
-                ("image/png".to_string(), 300 * 1024)
-            ]
-        );
-        // The 5-byte text stays inline; the image (fetch position 1) is in <id>.1, complete.
-        assert_eq!(dir.files(), [(format!("{ID}.1"), 300 * 1024)]);
-        drop(entry); // never committed by an index: its files go
-        assert!(dir.files().is_empty());
-    }
-
-    #[test]
-    fn exactly_the_inline_limit_stays_inline_and_one_byte_more_gets_a_file() {
-        for (len, file) in [(5 * 1024, false), (5 * 1024 + 1, true)] {
-            let dir = Dir::new();
-            let (readers, mut writers) = sources(&["text/plain"]);
-            writers[0].write_all(&vec![b'x'; len]).unwrap();
-            drop(writers);
-            let cancel = EventFd::new().unwrap();
-            let (outcome, sent) = run(&dir, readers, &["text/plain"], &cancel, IDLE);
-            assert_eq!(fetched(outcome), [("text/plain".into(), len as u64)]);
-            let expected: Vec<(String, u64)> = if file {
-                vec![(format!("{ID}.0"), len as u64)]
-            } else {
-                vec![]
-            };
-            assert_eq!(dir.files(), expected, "{len} B");
-            drop(sent);
-        }
-    }
-
-    #[test]
-    fn empty_types_are_left_out_and_all_empty_sends_nothing() {
-        let dir = Dir::new();
-        let (readers, mut writers) = sources(&["text/plain", "text/html"]);
-        writers[1].write_all(b"<b>").unwrap();
-        drop(writers);
-        let cancel = EventFd::new().unwrap();
-        let (outcome, sent) = run(&dir, readers, &["text/plain", "text/html"], &cancel, IDLE);
-        assert_eq!(fetched(outcome), [("text/html".into(), 3)]);
-        assert_eq!(sent.unwrap().types().len(), 1);
-
-        let (readers, writers) = sources(&["text/plain", "text/html"]);
-        drop(writers);
-        let (outcome, sent) = run(&dir, readers, &["text/plain", "text/html"], &cancel, IDLE);
-        assert!(fetched(outcome).is_empty());
-        assert!(sent.is_none());
-    }
+    // The fetch order, the inline limit and empty types are covered through the real daemon
+    // (tests/raw_daemon.rs). These three need a short idle timeout or a cancel at a chosen
+    // moment, which the daemon doesn't expose (its timeout is 5 s).
 
     #[test]
     fn a_silent_source_times_out_and_the_finished_types_and_their_files_are_dropped_too() {

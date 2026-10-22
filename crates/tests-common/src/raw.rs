@@ -184,6 +184,12 @@ impl RawCompositor {
         &self.path
     }
 
+    /// The listening socket, readable once a client is waiting in the backlog: poll it before
+    /// [`Self::accept`] when the client may die before it connects.
+    pub fn listener_fd(&self) -> BorrowedFd<'_> {
+        self.listener.as_fd()
+    }
+
     /// Accepts the next connection. Blocking, but a client that has already connected is queued
     /// in the backlog, so it returns at once.
     pub fn accept(&self) -> RawPeer {

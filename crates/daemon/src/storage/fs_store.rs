@@ -4,6 +4,7 @@ use std::{
     io::{self},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use clipleaf_core::log_debug;
@@ -13,7 +14,7 @@ const HOME_DIR: &str = "HOME";
 
 pub struct FsDataStore {
     base: PathBuf,
-    payloads: PathBuf,
+    payloads: Arc<Path>,
     lock: Option<File>,
 }
 
@@ -40,7 +41,7 @@ impl FsDataStore {
             .create(&payloads)?;
         Ok(FsDataStore {
             base,
-            payloads,
+            payloads: Arc::from(payloads),
             lock: None,
         })
     }
@@ -64,8 +65,16 @@ impl FsDataStore {
         }
     }
 
-    pub fn payloads_dir(&self) -> &Path {
-        &self.payloads
+    pub fn payloads_dir(&self) -> Arc<Path> {
+        self.payloads.clone()
+    }
+
+    pub fn wal_dir(&self) -> PathBuf {
+        self.base.join("wal.log")
+    }
+
+    pub fn base_dir(&self) -> &Path {
+        &self.base
     }
 
     pub fn clear_payloads(&self) -> io::Result<()> {

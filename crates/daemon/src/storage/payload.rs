@@ -14,9 +14,9 @@ use xxhash_rust::xxh3::Xxh3;
 use crate::storage::{Data, EntryBuilder, MAX_INLINE_TYPE_BYTES, TypeData};
 
 pub struct PayloadFile {
-    pub(super) path: PathBuf,
-    head: Option<Arc<[u8]>>,
-    //seqnum: usize
+    pub(super) head: Option<Arc<[u8]>>,
+    pub(super) seqnum: usize,
+    pub(super) id: u64,
 }
 
 pub struct PayloadWriter {
@@ -48,7 +48,10 @@ impl PayloadWriter {
                         self.file_id,
                         self.file_seqnum,
                     )?);
-                    log_debug!("Created payload file at {}", result.0.path.display());
+                    log_debug!(
+                        "Created payload file at {}",
+                        result.0.payload_path(&self.file_path_base).display()
+                    );
                     result.1.write_all(head)?;
                     result
                 }
@@ -96,8 +99,9 @@ impl Drop for PayloadWriter {
     fn drop(&mut self) {
         if let Some((payload, _file)) = self.file.take() {
             // still here means not finished
-            log_debug!("Dropping unfinished file at {}", payload.path.display());
-            if let Err(e) = fs::remove_file(&payload.path) {
+            let path = payload.payload_path(&self.file_path_base);
+            log_debug!("Dropping unfinished file at {}", path.display());
+            if let Err(e) = fs::remove_file(&path) {
                 log_error!("…: {e}");
             }
         }
@@ -105,19 +109,31 @@ impl Drop for PayloadWriter {
 }
 
 impl PayloadFile {
+    pub fn restored(id: u64, seqnum: usize, maybe_head: &[u8]) -> Self {
+        let head = match maybe_head.len() {
+            0 => None,
+            _ => Some(Arc::from(maybe_head.to_vec())),
+        };
+
+        Self { head, seqnum, id }
+    }
+
+    pub fn payload_path(&self, payload_dir: &Path) -> PathBuf {
+        payload_dir.join(format!("{}.{}", self.id, self.seqnum))
+    }
+
     pub fn create_write(dir: &Path, id: u64, seqnum: usize) -> io::Result<(Self, File)> {
-        let path = dir.join(format!("{}.{}", id, seqnum));
+        let paylad = Self {
+            head: None,
+            seqnum: seqnum,
+            id,
+        };
+
         let file = OpenOptions::new()
             .mode(0o600)
             .write(true)
             .create_new(true)
-            .open(&path)?;
-
-        let paylad = Self {
-            head: None,
-            path,
-            //seqnum: seqnum
-        };
+            .open(paylad.payload_path(dir))?;
 
         Ok((paylad, file))
     }
@@ -126,7 +142,8 @@ impl PayloadFile {
 impl Debug for PayloadFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PayloadFile")
-            .field("path", &self.path)
+            .field("id", &self.id)
+            .field("seqnum", &self.seqnum)
             .field("head", &self.head.as_ref().map(|h| h.len()))
             .finish()
     }

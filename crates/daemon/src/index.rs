@@ -2,8 +2,10 @@ use std::{
     cmp::max,
     collections::HashMap,
     io, mem,
+    ops::Deref,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
+        atomic::AtomicBool,
         mpsc::{self, Receiver, Sender},
     },
     thread,
@@ -11,7 +13,10 @@ use std::{
 
 use clipleaf_core::{log_debug, log_error};
 
-use crate::storage::Entry;
+use crate::storage::{
+    Entry,
+    wal::log::{LogMsg, Restored},
+};
 
 pub enum IndexMsg {
     Insert {
@@ -20,6 +25,7 @@ pub enum IndexMsg {
         entry: Entry,
     },
 }
+
 #[derive(Debug, Clone)]
 pub struct Item {
     pub seq: u64,
@@ -53,6 +59,7 @@ struct Index {
     history_count_limit: usize,
     pinned_count: usize,
     shared: SnapshotHandle,
+    log_sender: Sender<LogMsg>,
 }
 
 impl Index {
@@ -68,11 +75,11 @@ impl Index {
         }
     }
 
-    fn insert(&mut self, seq: u64, time_ms: u64, entry: Entry) {
+    fn insert(&mut self, seq: u64, time_ms: u64, mut entry: Entry) {
         let mut items = self.current.items.clone();
-        if let Some(id) = self.by_key.get(&entry.key()) {
+        if let Some(id) = self.by_key.get(&entry.key) {
             // duplicate - move to front and drop the msg.
-            if let Some(i) = items.iter().rposition(|x| x.entry.id() == *id) {
+            if let Some(i) = items.iter().rposition(|x| x.entry.id == *id) {
                 let mut item = items.remove(i);
                 item.seq = max(item.seq, seq);
                 item.time_ms = max(item.time_ms, time_ms);
@@ -93,7 +100,7 @@ impl Index {
         }
 
         entry.commit();
-        self.by_key.insert(entry.key(), entry.id());
+        self.by_key.insert(entry.key, entry.id);
         let item = Item {
             seq,
             time_ms,
@@ -104,8 +111,11 @@ impl Index {
         items.insert(
             // insert just behind the next biggest seq num.
             items.partition_point(|x| x.seq > seq),
-            item,
+            item.clone(),
         );
+        if let Err(e) = self.log_sender.send(LogMsg::Append(item)) {
+            log_error!("Failed sending message to WAL: {e}");
+        }
 
         while items.len().saturating_sub(self.pinned_count) > self.history_count_limit {
             let Some(i) = items.iter().rposition(|it| !it.pinned) else {
@@ -113,9 +123,15 @@ impl Index {
             };
 
             let item = items.remove(i);
-            self.by_key.remove(&item.entry.key());
-            item.entry.uncommit();
-            log_debug!("Evicted stale entry: {:?}", item);
+            if let Some(val) = self.by_key.get(&item.entry.key)
+                && item.entry.id == *val
+            {
+                self.by_key.remove(&item.entry.key);
+            }
+            log_debug!("Evicting stale entry: {:?}", item);
+            if let Err(e) = self.log_sender.send(LogMsg::Delete(item)) {
+                log_error!("Failed sending message to WAL: {e}");
+            }
         }
 
         log_debug!("Total entries {:?}.", items.len());
@@ -131,17 +147,25 @@ impl Index {
     }
 }
 
-pub fn spawn_index(history_count_limit: usize) -> io::Result<(Sender<IndexMsg>, SnapshotHandle)> {
+pub fn spawn_index(
+    history_count_limit: usize,
+    log_tx: Sender<LogMsg>,
+    restored: Restored,
+) -> io::Result<(Sender<IndexMsg>, SnapshotHandle)> {
     let (tx, rx) = mpsc::channel();
 
-    let current = Arc::new(Snapshot { items: Vec::new() });
+    let pinned_count = restored.items.iter().filter(|i| i.pinned).count();
+    let current = Arc::new(Snapshot {
+        items: restored.items,
+    });
     let handle = SnapshotHandle(Arc::new(Mutex::new(current.clone())));
     let index = Index {
-        by_key: HashMap::new(),
+        by_key: restored.by_key,
         current,
         history_count_limit,
         shared: handle.clone(),
-        pinned_count: 0,
+        pinned_count: pinned_count,
+        log_sender: log_tx,
     };
     thread::Builder::new()
         .name("index".into())
