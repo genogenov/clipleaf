@@ -81,11 +81,11 @@ impl Index {
                 let mut item = items.remove(i);
                 item.seq = max(item.seq, seq);
                 item.time_ms = max(item.time_ms, time_ms);
-                log_debug!(
-                    "Copy matches entry {} - moved to top. Skipping entry item {:?}",
-                    id,
-                    item
-                );
+                // log_debug!(
+                //     "Copy matches entry {} - moved to top. Skipping entry item {:?}",
+                //     id,
+                //     item
+                // );
                 if let Err(e) = self.log_sender.send(LogMsg::Touch {
                     id: item.entry.id,
                     seq: item.seq,

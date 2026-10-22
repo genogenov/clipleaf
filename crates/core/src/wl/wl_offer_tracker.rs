@@ -61,11 +61,11 @@ impl WlOfferTracker {
     }
 
     pub fn data_control_offer(&mut self, id: u32, mime: &[u8]) -> Result<(), std::io::Error> {
-        log_debug!(
-            "Received DataControlOffer with id {} and mime_type {:?}",
-            id,
-            String::from_utf8_lossy(mime)
-        );
+        // log_debug!(
+        //     "Received DataControlOffer with id {} and mime_type {:?}",
+        //     id,
+        //     String::from_utf8_lossy(mime)
+        // );
 
         let Some(offer) = self
             .offers

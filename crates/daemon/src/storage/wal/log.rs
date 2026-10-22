@@ -8,9 +8,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, RecvError, RecvTimeoutError, Sender},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use clipleaf_core::{log_debug, log_error, log_info, log_warn};
@@ -28,6 +29,8 @@ use crate::{
         },
     },
 };
+
+const LOG_FILE_SYNC_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 pub enum LogMsg {
@@ -48,6 +51,10 @@ pub struct WriteAheadLog {
     payloads: Arc<Path>,
     header: Header,
     last_good_len: u64,
+    last_written_without_sync: Option<Instant>,
+    failures: i32,
+    has_pending_trim: bool,
+    fail_threshold: i32,
 }
 
 impl WriteAheadLog {
@@ -105,6 +112,10 @@ impl WriteAheadLog {
             payloads,
             header,
             last_good_len: pos,
+            fail_threshold: 5,
+            failures: 0,
+            has_pending_trim: false,
+            last_written_without_sync: None,
         })
     }
 
@@ -279,46 +290,79 @@ impl WriteAheadLog {
 
     fn run(mut self, rx: Receiver<LogMsg>) {
         let mut write_buf = vec![0u8; MAX_RECORD_LEN as usize];
-        let mut failures = 0;
-        let fail_threshold = 5;
-        let mut has_pending_trim = false;
-        while let Ok(msg) = rx.recv() {
-            log_debug!("Processing WAL msg: {:?}", msg);
-            let res = self.handle_msg(&mut write_buf, &mut has_pending_trim, msg);
 
-            match res {
-                Err(e) => {
-                    if failures < fail_threshold {
-                        log_error!("An error occurred while processing WAL msg: {e}");
-                    } else if failures == fail_threshold {
-                        log_error!(
-                            "An error occurred while processing WAL msg, and errors count reached the configured threshold, silencing until reccovery: {e}"
-                        );
-                    }
-                    failures += 1;
-                    if !has_pending_trim && !self.try_trim() {
-                        has_pending_trim = true;
-                    }
-                }
-                Ok(()) if failures > 0 => {
-                    log_warn!("WAL writes recovered after {} failed records", failures);
-                    failures = 0;
-                }
-                Ok(()) => {}
-            }
+        while let Ok(msg) = self.receive_msg(&rx) {
+            log_debug!("Processing WAL msg: {:?}", msg);
+            let res = self.handle_msg(&mut write_buf, msg);
+            self.handle_msg_processing_result(res);
+        }
+
+        // disconnected
+        if self.last_written_without_sync.is_some() {
+            self.sync_log_file();
         }
     }
 
-    fn handle_msg(
-        &mut self,
-        write_buf: &mut [u8],
-        has_pending_trim: &mut bool,
-        msg: LogMsg,
-    ) -> Result<(), io::Error> {
-        if *has_pending_trim {
+    fn handle_msg_processing_result(&mut self, res: io::Result<()>) {
+        match res {
+            Err(e) => {
+                if self.failures < self.fail_threshold {
+                    log_error!("An error occurred while processing WAL msg: {e}");
+                } else if self.failures == self.fail_threshold {
+                    log_error!(
+                        "An error occurred while processing WAL msg, and errors count reached the configured threshold, silencing until reccovery: {e}"
+                    );
+                }
+                self.failures += 1;
+                if !self.has_pending_trim && !self.try_trim() {
+                    self.has_pending_trim = true;
+                }
+            }
+            Ok(()) if self.failures > 0 => {
+                log_warn!(
+                    "WAL writes recovered after {} failed records",
+                    self.failures
+                );
+                self.failures = 0;
+            }
+            Ok(()) => {}
+        }
+    }
+
+    fn receive_msg(&mut self, rx: &Receiver<LogMsg>) -> Result<LogMsg, RecvError> {
+        let Some(last) = self.last_written_without_sync else {
+            return rx.recv();
+        };
+
+        let timeout = LOG_FILE_SYNC_DELAY.saturating_sub(last.elapsed());
+        if timeout.is_zero() {
+            self.sync_log_file();
+            return rx.recv();
+        }
+        match rx.recv_timeout(timeout) {
+            Ok(val) => Ok(val),
+            Err(RecvTimeoutError::Timeout) => {
+                self.sync_log_file();
+                rx.recv()
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(RecvError),
+        }
+    }
+
+    fn sync_log_file(&mut self) {
+        if let Err(e) = self.log_file.sync_data() {
+            self.handle_msg_processing_result(Err(e));
+        } else {
+            self.last_written_without_sync = None;
+            log_debug!("Synced WAL log file");
+        }
+    }
+
+    fn handle_msg(&mut self, write_buf: &mut [u8], msg: LogMsg) -> Result<(), io::Error> {
+        if self.has_pending_trim {
             if self.try_trim() {
                 log_info!("Recovered after pending trim");
-                *has_pending_trim = false;
+                self.has_pending_trim = false;
             } else {
                 if let LogMsg::Delete(item) = &msg {
                     log_warn!("Dropping files for Delete request while WAL trim is failing.");
@@ -352,8 +396,7 @@ impl WriteAheadLog {
         self.sync_payload_files(record)?;
 
         let len = encode_append(record, self.header.salt, buf).map_err(io::Error::other)?;
-        self.log_file.write_all(&buf[..len])?;
-        self.last_good_len += len as u64;
+        self.write_to_log(len, buf)?;
         log_debug!("Processed WAL append - written {} bytes", len);
         Ok(())
     }
@@ -361,11 +404,7 @@ impl WriteAheadLog {
     fn delete(&mut self, entry: &Item, buf: &mut [u8]) -> Result<(), io::Error> {
         log_debug!("Processing WAL delete..");
         let len = encode_delete(entry.entry.id, self.header.salt, buf).map_err(io::Error::other)?;
-        let res = self.log_file.write_all(&buf[..len]);
-
-        if res.is_ok() {
-            self.last_good_len += len as u64;
-        }
+        let res = self.write_to_log(len, buf);
 
         log_debug!("Dropping entry files..");
         entry.entry.drop_files();
@@ -377,10 +416,16 @@ impl WriteAheadLog {
     fn touch(&mut self, id: u64, seq: u64, time_ms: u64, buf: &mut [u8]) -> Result<(), io::Error> {
         let len =
             encode_touch(id, seq, time_ms, self.header.salt, buf).map_err(io::Error::other)?;
-        self.log_file.write_all(&buf[..len])?;
-
-        self.last_good_len += len as u64;
+        self.write_to_log(len, buf)?;
         log_debug!("Processed WAL touch - written {} bytes", len);
+        Ok(())
+    }
+
+    fn write_to_log(&mut self, len: usize, buf: &mut [u8]) -> Result<(), io::Error> {
+        self.log_file.write_all(&buf[..len])?;
+        self.last_good_len += len as u64;
+        self.last_written_without_sync
+            .get_or_insert_with(Instant::now);
         Ok(())
     }
 

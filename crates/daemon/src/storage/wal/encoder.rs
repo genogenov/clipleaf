@@ -87,7 +87,7 @@ pub fn encode_append(item: &Item, salt: u64, buff: &mut [u8]) -> Result<usize, W
 
     // type
     encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
-    log_debug!("encode: entry id: {}", item.entry.id);
+    // log_debug!("encode: entry id: {}", item.entry.id);
     encode_with_size_check(&mut offset, buff, &item.entry.id.to_le_bytes())?;
     encode_with_size_check(&mut offset, buff, &item.seq.to_le_bytes())?;
     encode_with_size_check(&mut offset, buff, &item.time_ms.to_le_bytes())?;
@@ -159,20 +159,20 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
         return Err(WalError::Corrupted);
     }
 
-    log_debug!(
-        "decode: Calculating checksum for {} bytes with salt {}",
-        len,
-        salt
-    );
+    // log_debug!(
+    //     "decode: Calculating checksum for {} bytes with salt {}",
+    //     len,
+    //     salt
+    // );
     let record_checksum = xxh3_64_with_seed(&buff[..len as usize], salt);
     log_debug!("Reading checksum at offset: {}", len);
     let (stored_checksum, _) = read_u64(&buff[len as usize..8 + len as usize])?;
 
-    log_debug!(
-        "decode: Record checksum: {}  stored checksum: {}",
-        record_checksum,
-        stored_checksum
-    );
+    // log_debug!(
+    //     "decode: Record checksum: {}  stored checksum: {}",
+    //     record_checksum,
+    //     stored_checksum
+    // );
     if record_checksum != stored_checksum {
         log_error!("Record checksums do not match.");
         return Err(WalError::Corrupted);
@@ -185,7 +185,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
     match t {
         INSERT_TYPE => {
             let (id, rest) = read_u64(rest)?;
-            log_debug!("decode: entry id: {}", id);
+            // log_debug!("decode: entry id: {}", id);
 
             let (seq, rest) = read_u64(rest)?;
             let (time_ms, rest) = read_u64(rest)?;
@@ -233,13 +233,13 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
 
 fn encode_len_and_checksum(len: u32, salt: u64, buff: &mut [u8]) -> Result<(), WalError> {
     buff[0..4].copy_from_slice(&len.to_le_bytes());
-    log_debug!(
-        "encode: Calculating checksum for {} bytes with salt {}",
-        len,
-        salt
-    );
+    // log_debug!(
+    //     "encode: Calculating checksum for {} bytes with salt {}",
+    //     len,
+    //     salt
+    // );
     let checksum = &xxh3_64_with_seed(&buff[..len as usize], salt);
-    log_debug!("encode: checksum: {} at offset {}", checksum, len);
+    // log_debug!("encode: checksum: {} at offset {}", checksum, len);
     let mut ofset: usize = len as usize;
     encode_with_size_check(&mut ofset, buff, &checksum.to_le_bytes())?;
     Ok(())

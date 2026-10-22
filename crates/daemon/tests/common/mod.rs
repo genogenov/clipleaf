@@ -1,23 +1,28 @@
 //! The real `clipleafd` binary against the scripted raw peer, shared by the daemon's tests.
 //!
-//! No sleeps: every wait is for a request or a log line, bounded at 10 s only so a hang fails.
-//! The state dir can outlive one daemon, so a test can stop it (SIGKILL, the same as a crash)
-//! and start the next one on the same history.
+//! The tests observe only what the daemon does: the requests it sends and what it writes to
+//! `wal.log` and `payloads/`, never its log lines. Every wait is for a request (blocking on the
+//! socket) or for the next WAL record (the file is re-read every millisecond), bounded at 10 s
+//! only so a hang fails. The state dir can outlive one daemon, so a test can stop it (SIGKILL,
+//! the same as a crash) and start the next one on the same history.
+//!
+//! The history itself isn't readable until step 4's IPC, so a test asks it by copying: a copy
+//! of an entry that is in the history is a duplicate (a Touch record), anything else is a new
+//! entry (an Insert record). Set `CLIPLEAF_TEST_LOG=debug` to see the daemon's stderr.
 #![allow(dead_code)] // each test file uses a different part
+
+pub mod wal;
 
 use std::{
     collections::VecDeque,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     os::fd::OwnedFd,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        mpsc::{self, Receiver},
-    },
+    sync::atomic::{AtomicU32, Ordering},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use clipleaf_core::{PollFd, PollResult, ffi::POLLIN, poll};
@@ -33,11 +38,6 @@ use clipleaf_test_common::{
 pub const WAIT: Duration = Duration::from_secs(10);
 pub const UTF8: &str = "text/plain;charset=utf-8";
 pub const PNG: &str = "image/png";
-/// Logged by the log thread once a record is written (debug level).
-pub const APPENDED: &str = "Processed WAL append";
-pub const DELETED: &str = "Processed WAL delete";
-pub const DUPLICATE: &str = "Copy matches entry";
-pub const TOUCHED: &str = "Processed WAL touch";
 
 /// `$XDG_STATE_HOME` for one test: the daemon keeps its history in `<root>/clipleaf`.
 /// Removed when the test ends.
@@ -115,7 +115,11 @@ pub struct Receive {
 
 pub struct Daemon {
     peer: RawPeer,
-    lines: Receiver<String>,
+    wal: PathBuf,
+    /// WAL records already returned (or there at startup).
+    seen: usize,
+    /// Offers the daemon has destroyed so far.
+    destroyed: Vec<u32>,
     fds: VecDeque<OwnedFd>,
     child: Option<Guarded>,
     next_offer: u32,
@@ -136,26 +140,18 @@ impl Daemon {
     /// its registry round trip.
     pub fn start_in(state: &StateDir) -> Self {
         let comp = RawCompositor::new();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_clipleafd"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_clipleafd"));
+        command
             .env_clear()
             .env("WAYLAND_DISPLAY", comp.path())
             .env("XDG_STATE_HOME", state.root())
-            .env("CLIPLEAF_LOG", "debug") // the log lines the tests wait for
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn clipleafd");
-        let stderr = child.stderr.take().unwrap();
-        let (tx, lines) = mpsc::channel();
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).lines() {
-                let Ok(line) = line else { break };
-                if tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
+            .stdout(Stdio::null());
+        match std::env::var("CLIPLEAF_TEST_LOG") {
+            Ok(level) => command.env("CLIPLEAF_LOG", level).stderr(Stdio::inherit()),
+            Err(_) => command.env("CLIPLEAF_LOG", "off").stderr(Stdio::null()),
+        };
+        let mut child = command.spawn().expect("spawn clipleafd");
         // A daemon that fails at startup never connects: fail with its exit status, don't hang.
         let mut listener = [PollFd::new(comp.listener_fd(), POLLIN)];
         if !matches!(poll(&mut listener, Some(WAIT)), Ok(PollResult::Ready(_))) {
@@ -170,9 +166,11 @@ impl Daemon {
             (1, "wl_seat", 1),
             (54, "ext_data_control_manager_v1", 1),
         ]));
-        let daemon = Self {
+        let mut daemon = Self {
             peer,
-            lines,
+            wal: state.wal(),
+            seen: 0,
+            destroyed: Vec::new(),
             fds: VecDeque::new(),
             child: Some(Guarded::new(child)),
             next_offer: SERVER_ID_START,
@@ -188,6 +186,8 @@ impl Daemon {
             daemon.wait_readable("get_data_device");
             seen.extend(daemon.peer.requests());
         }
+        // The history is restored (and the log cut or reset) before the daemon connects.
+        daemon.seen = wal::records(&fs::read(&daemon.wal).unwrap()).len();
         daemon
     }
 
@@ -228,18 +228,40 @@ impl Daemon {
         self.receives_while(|rs| !rs.iter().any(|r| r.offer == offer))
     }
 
+    /// Every `receive` the daemon sends until it destroys `offer`. The daemon destroys the
+    /// previous selection's offer while it reads the next selection, so this returns once that
+    /// selection has been read.
+    pub fn receives_until_destroyed(&mut self, offer: u32) -> Vec<Receive> {
+        let mut receives = Vec::new();
+        while !self.destroyed.contains(&offer) {
+            receives.extend(self.receives_once());
+        }
+        receives
+    }
+
     fn receives_while(&mut self, mut more: impl FnMut(&[Receive]) -> bool) -> Vec<Receive> {
         let mut receives = Vec::new();
         while more(&receives) {
-            self.wait_readable("receive");
-            let batches = self.peer.recv_batches();
-            assert!(!batches.is_empty(), "clipleafd hung up");
-            for batch in batches {
-                self.fds.extend(batch.fds);
-                for request in wire::parse(&batch.bytes) {
-                    if let Some(receive) = self.as_receive(&request) {
-                        receives.push(receive);
-                    }
+            let got = self.receives_once();
+            receives.extend(got);
+        }
+        receives
+    }
+
+    /// Reads one round of requests: the receives in it (destroys go to `self.destroyed`).
+    fn receives_once(&mut self) -> Vec<Receive> {
+        let mut receives = Vec::new();
+        self.wait_readable("request");
+        let batches = self.peer.recv_batches();
+        assert!(!batches.is_empty(), "clipleafd hung up");
+        for batch in batches {
+            self.fds.extend(batch.fds);
+            for request in wire::parse(&batch.bytes) {
+                if request.object_id >= SERVER_ID_START && request.opcode == OFFER_DESTROY {
+                    self.destroyed.push(request.object_id);
+                }
+                if let Some(receive) = self.as_receive(&request) {
+                    receives.push(receive);
                 }
             }
         }
@@ -273,32 +295,69 @@ impl Daemon {
         }
     }
 
-    /// A copy that must become a new entry: returns once its record is written.
-    pub fn copy_new(&mut self, types: &[(&str, &[u8])]) {
+    /// A copy that must become a new entry: returns its Insert record.
+    pub fn copy_new(&mut self, types: &[(&str, &[u8])]) -> wal::Insert {
         self.copy(types);
-        self.line_with(APPENDED);
+        self.next_insert()
     }
 
-    /// Waits until each needle has appeared in some line, in any order (lines from different
-    /// threads, such as a job's result and its WAL append, may come either way round).
-    pub fn lines_with(&self, needles: &[&str]) {
-        let mut missing: Vec<&str> = needles.to_vec();
-        while !missing.is_empty() {
-            match self.lines.recv_timeout(WAIT) {
-                Ok(line) => missing.retain(|n| !line.contains(n)),
-                Err(e) => panic!("no log lines with {missing:?}: {e}"),
-            }
+    /// A copy that must match an entry in the history: returns that entry's id.
+    pub fn copy_dup(&mut self, types: &[(&str, &[u8])]) -> u64 {
+        self.copy(types);
+        match self.next_record() {
+            wal::Record::Touch { id, .. } => id,
+            other => panic!("expected a Touch (a duplicate), got {other:?}"),
         }
     }
 
-    /// Waits for the next log line that contains `needle`.
-    pub fn line_with(&self, needle: &str) -> String {
+    /// Whether these types are an entry in the history: copies them (so a missing one is
+    /// added). Ask about missing ones last.
+    pub fn has(&mut self, types: &[(&str, &[u8])]) -> bool {
+        self.copy(types);
+        match self.next_record() {
+            wal::Record::Touch { .. } => true,
+            wal::Record::Insert(_) => false,
+            other => panic!("expected a Touch or an Insert, got {other:?}"),
+        }
+    }
+
+    pub fn next_insert(&mut self) -> wal::Insert {
+        match self.next_record() {
+            wal::Record::Insert(insert) => insert,
+            other => panic!("expected an Insert, got {other:?}"),
+        }
+    }
+
+    /// The id of the next Delete record (an eviction).
+    pub fn next_delete(&mut self) -> u64 {
+        match self.next_record() {
+            wal::Record::Delete { id } => id,
+            other => panic!("expected a Delete, got {other:?}"),
+        }
+    }
+
+    /// Waits for the next record the daemon writes to `wal.log`.
+    pub fn next_record(&mut self) -> wal::Record {
+        let start = Instant::now();
         loop {
-            match self.lines.recv_timeout(WAIT) {
-                Ok(line) if line.contains(needle) => return line,
-                Ok(_) => {}
-                Err(e) => panic!("no log line with {needle:?}: {e}"),
+            let records = wal::records(&fs::read(&self.wal).unwrap());
+            if let Some(record) = records.into_iter().nth(self.seen) {
+                self.seen += 1;
+                return record;
             }
+            let child = self.child.as_mut().unwrap().child();
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "clipleafd exited ({status}) before writing record {}",
+                    self.seen
+                );
+            }
+            assert!(
+                start.elapsed() < WAIT,
+                "no WAL record {} from clipleafd",
+                self.seen
+            );
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }
