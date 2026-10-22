@@ -22,7 +22,7 @@ use crate::{
         wal::{
             encoder::{
                 HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreRecord, decode_header,
-                decode_record, encode_append, encode_delete, encode_header,
+                decode_record, encode_append, encode_delete, encode_header, encode_touch,
             },
             error::WalError,
         },
@@ -33,6 +33,7 @@ use crate::{
 pub enum LogMsg {
     Append(Item),
     Delete(Item),
+    Touch { id: u64, seq: u64, time_ms: u64 },
 }
 
 pub struct Restored {
@@ -152,6 +153,13 @@ impl WriteAheadLog {
                 }
                 RestoreRecord::Delete { id } => {
                     by_id.remove(&id);
+                }
+                RestoreRecord::Touch { id, seq, time_ms } => {
+                    max_seq_seen = max(max_seq_seen, max(seq, id));
+                    by_id.entry(id).and_modify(|e| {
+                        e.seq = max(e.seq, seq);
+                        e.time_ms = max(e.time_ms, time_ms);
+                    });
                 }
             }
         }
@@ -324,6 +332,7 @@ impl WriteAheadLog {
         match &msg {
             LogMsg::Append(record) => self.append(record, write_buf),
             LogMsg::Delete(record) => self.delete(record, write_buf),
+            LogMsg::Touch { id, seq, time_ms } => self.touch(*id, *seq, *time_ms, write_buf),
         }
     }
 
@@ -357,6 +366,16 @@ impl WriteAheadLog {
         entry.entry.drop_files();
         res?;
         log_debug!("Processed WAL delete - written {} bytes", len);
+        Ok(())
+    }
+
+    fn touch(&mut self, id: u64, seq: u64, time_ms: u64, buf: &mut [u8]) -> Result<(), io::Error> {
+        let len =
+            encode_touch(id, seq, time_ms, self.header.salt, buf).map_err(io::Error::other)?;
+        self.log_file.write_all(&buf[..len])?;
+
+        self.last_good_len += len as u64;
+        log_debug!("Processed WAL touch - written {} bytes", len);
         Ok(())
     }
 }

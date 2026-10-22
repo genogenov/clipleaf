@@ -37,6 +37,7 @@ pub const PNG: &str = "image/png";
 pub const APPENDED: &str = "Processed WAL append";
 pub const DELETED: &str = "Processed WAL delete";
 pub const DUPLICATE: &str = "Copy matches entry";
+pub const TOUCHED: &str = "Processed WAL touch";
 
 /// `$XDG_STATE_HOME` for one test: the daemon keeps its history in `<root>/clipleaf`.
 /// Removed when the test ends.

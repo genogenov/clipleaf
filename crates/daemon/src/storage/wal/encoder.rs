@@ -25,6 +25,7 @@ pub struct Header {
 pub enum RestoreRecord {
     Insert(RestoreItem),
     Delete { id: u64 },
+    Touch { id: u64, seq: u64, time_ms: u64 },
 }
 
 #[derive(Debug)]
@@ -38,6 +39,7 @@ pub struct RestoreItem {
 
 const INSERT_TYPE: u8 = 1;
 const DELETE_TYPE: u8 = 2;
+const TOUCH_TYPE: u8 = 3;
 
 pub fn encode_header(h: &Header, buff: &mut [u8; HEADER_LEN]) {
     let mut offset = 0;
@@ -124,6 +126,30 @@ pub fn encode_delete(id: u64, salt: u64, buff: &mut [u8]) -> Result<usize, WalEr
     Ok(offset + 8)
 }
 
+pub fn encode_touch(
+    id: u64,
+    seq: u64,
+    time_ms: u64,
+    salt: u64,
+    buff: &mut [u8],
+) -> Result<usize, WalError> {
+    let t: u8 = TOUCH_TYPE;
+    let mut offset = 4; // the len
+
+    // type
+    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
+    encode_with_size_check(&mut offset, buff, &id.to_le_bytes())?;
+    encode_with_size_check(&mut offset, buff, &seq.to_le_bytes())?;
+    encode_with_size_check(&mut offset, buff, &time_ms.to_le_bytes())?;
+
+    if offset as u32 > MAX_RECORD_LEN {
+        return Err(WalError::Corrupted);
+    }
+
+    encode_len_and_checksum(offset as u32, salt, buff)?;
+    Ok(offset + 8)
+}
+
 pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), WalError> {
     let (len, _rest) = read_u32(buff)?;
 
@@ -193,6 +219,13 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
             let (id, _) = read_u64(rest)?;
 
             Ok((len as usize + 8, RestoreRecord::Delete { id }))
+        }
+        TOUCH_TYPE => {
+            let (id, rest) = read_u64(rest)?;
+            let (seq, rest) = read_u64(rest)?;
+            let (time_ms, _) = read_u64(rest)?;
+
+            Ok((len as usize + 8, RestoreRecord::Touch { id, seq, time_ms }))
         }
         t => Err(WalError::UnknownType((len as usize + 8, t))),
     }

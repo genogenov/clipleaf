@@ -14,6 +14,7 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 const IDENTIFIER: &[u8; 14] = b"CLIPLEAF WAL\0\0";
 const HEADER_LEN: usize = 40;
 const INSERT: u8 = 1;
+const TOUCH: u8 = 3;
 
 fn salt_of(wal: &[u8]) -> u64 {
     u64::from_le_bytes(wal[16..24].try_into().unwrap())
@@ -100,6 +101,48 @@ fn the_history_survives_a_restart_and_a_recopy_after_it_is_a_duplicate() {
     let daemon = Daemon::start_in(&state);
     daemon.line_with("Restored 3 entries.");
     assert_eq!(state.payload_files().len(), 2);
+}
+
+#[test]
+fn a_recopied_entry_stays_newer_than_the_ones_before_it_after_a_restart() {
+    let state = StateDir::new();
+    let mut daemon = Daemon::start_in(&state);
+    daemon.copy_new(&[(UTF8, &big(1))]); // A
+    daemon.copy_new(&[(UTF8, &big(2))]); // B
+    let files = state.payload_files();
+    let (a, b) = (files[0].clone(), files[1].clone());
+    daemon.copy(&[(UTF8, &big(1))]); // A again: now newer than B
+    daemon.lines_with(&[DUPLICATE, TOUCHED]);
+    daemon.stop();
+
+    // The order isn't printed, so eviction shows it: 99 more copies push out the oldest.
+    let mut daemon = Daemon::start_in(&state);
+    daemon.line_with("Restored 2 entries.");
+    for i in 0..99 {
+        daemon.copy_new(&[(UTF8, format!("entry {i}").as_bytes())]);
+    }
+    daemon.line_with(DELETED);
+    assert_eq!(state.payload_files(), [a], "B ({b:?}) is the oldest");
+}
+
+#[test]
+fn a_touch_of_an_unknown_entry_is_ignored_but_its_seq_is_never_reused() {
+    // A Touch can outlive its entry only in a hand-made log, but its seq was handed out once.
+    let state = StateDir::new();
+    let mut daemon = Daemon::start_in(&state);
+    daemon.copy_new(&[(UTF8, b"first")]);
+    daemon.stop();
+    let body = [999u64, 1000, 0].map(u64::to_le_bytes).concat();
+    append(&state, &record(salt_of(&state.wal_bytes()), TOUCH, &body));
+    let with_touch = state.wal_len();
+
+    let mut daemon = Daemon::start_in(&state);
+    daemon.line_with("Restored 1 entries.");
+    assert_eq!(state.wal_len(), with_touch, "a valid record is not cut");
+    daemon.copy_new(&[(UTF8, &big(0))]);
+    let files = state.payload_files();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert!(id_and_type(&files[0].0).0 > 1000, "{files:?}");
 }
 
 #[test]

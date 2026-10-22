@@ -86,6 +86,13 @@ impl Index {
                     id,
                     item
                 );
+                if let Err(e) = self.log_sender.send(LogMsg::Touch {
+                    id: item.entry.id,
+                    seq: item.seq,
+                    time_ms: item.time_ms,
+                }) {
+                    log_error!("Failed sending touch message to WAL: {e}");
+                }
                 items.insert(items.partition_point(|i| i.seq > item.seq), item);
                 log_debug!("Total entries {:?}.", items.len());
                 self.publish(items);
