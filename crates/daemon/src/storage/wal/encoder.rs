@@ -21,8 +21,13 @@ pub struct Header {
     pub seq_snapshot: u64,
 }
 
+pub struct RestoreRecord {
+    pub size_on_disk: u32,
+    pub op: RestoreOp,
+}
+
 #[derive(Debug)]
-pub enum RestoreRecord {
+pub enum RestoreOp {
     Insert(RestoreItem),
     Delete { id: u64 },
     Touch { id: u64, seq: u64, time_ms: u64 },
@@ -35,6 +40,7 @@ pub struct RestoreItem {
     pub time_ms: u64,
     pub pinned: bool,
     pub types: Vec<TypeData>,
+    pub size_on_disk: u32,
 }
 
 const INSERT_TYPE: u8 = 1;
@@ -81,7 +87,7 @@ pub fn decode_header(buff: &[u8]) -> Result<Header, WalError> {
 }
 
 /// encoded as len, type, id, seq, time, pinned, entry count, [entry], checksum
-pub fn encode_append(item: &Item, salt: u64, buff: &mut [u8]) -> Result<usize, WalError> {
+pub fn encode_append(item: &Item, salt: u64, buff: &mut [u8]) -> Result<u32, WalError> {
     let t: u8 = INSERT_TYPE;
     let mut offset = 4; // the len
 
@@ -101,13 +107,14 @@ pub fn encode_append(item: &Item, salt: u64, buff: &mut [u8]) -> Result<usize, W
         encode_stored_type_data(typedata, &mut offset, buff)?;
     }
 
-    if offset as u32 > MAX_RECORD_LEN {
+    let total_len = offset as u32 + 8;
+    if total_len > MAX_RECORD_LEN {
         return Err(WalError::Corrupted);
     }
 
     encode_len_and_checksum(offset as u32, salt, buff)?;
 
-    Ok(offset + 8)
+    Ok(total_len)
 }
 
 pub fn encode_delete(id: u64, salt: u64, buff: &mut [u8]) -> Result<usize, WalError> {
@@ -150,12 +157,13 @@ pub fn encode_touch(
     Ok(offset + 8)
 }
 
-pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), WalError> {
+pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
     let (len, _rest) = read_u32(buff)?;
 
     log_debug!("Checking len field.. {}, {}", len, buff.len());
     // len needs to be at least size(u32) + size(u8) for len + type
-    if !(5..=MAX_RECORD_LEN).contains(&len) || buff.len() < 8 + len as usize {
+    let total_len = len.saturating_add(8); // len of record + checksum; 
+    if len < 5 || total_len > MAX_RECORD_LEN || buff.len() < total_len as usize {
         return Err(WalError::Corrupted);
     }
 
@@ -166,7 +174,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
     // );
     let record_checksum = xxh3_64_with_seed(&buff[..len as usize], salt);
     log_debug!("Reading checksum at offset: {}", len);
-    let (stored_checksum, _) = read_u64(&buff[len as usize..8 + len as usize])?;
+    let (stored_checksum, _) = read_u64(&buff[len as usize..total_len as usize])?;
 
     // log_debug!(
     //     "decode: Record checksum: {}  stored checksum: {}",
@@ -204,30 +212,37 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<(usize, RestoreRecord), W
                 types.push(entry);
             }
 
-            Ok((
-                len as usize + 8,
-                RestoreRecord::Insert(RestoreItem {
+            Ok(RestoreRecord {
+                size_on_disk: total_len,
+                op: RestoreOp::Insert(RestoreItem {
                     seq,
                     time_ms,
                     pinned,
                     id,
                     types,
+                    size_on_disk: total_len,
                 }),
-            ))
+            })
         }
         DELETE_TYPE => {
             let (id, _) = read_u64(rest)?;
 
-            Ok((len as usize + 8, RestoreRecord::Delete { id }))
+            Ok(RestoreRecord {
+                size_on_disk: total_len,
+                op: RestoreOp::Delete { id },
+            })
         }
         TOUCH_TYPE => {
             let (id, rest) = read_u64(rest)?;
             let (seq, rest) = read_u64(rest)?;
             let (time_ms, _) = read_u64(rest)?;
 
-            Ok((len as usize + 8, RestoreRecord::Touch { id, seq, time_ms }))
+            Ok(RestoreRecord {
+                size_on_disk: total_len,
+                op: RestoreOp::Touch { id, seq, time_ms },
+            })
         }
-        t => Err(WalError::UnknownType((len as usize + 8, t))),
+        t => Err(WalError::UnknownType((total_len, t))),
     }
 }
 

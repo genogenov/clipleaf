@@ -6,7 +6,7 @@ pub enum WalError {
     UnsupportedVersion(u16),
     Corrupted,
     SmallEncodeBuffer,
-    UnknownType((usize, u8)),
+    UnknownType((u32, u8)),
 }
 
 impl Display for WalError {

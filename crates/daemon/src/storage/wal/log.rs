@@ -22,13 +22,19 @@ use crate::{
         Data, Entry, entry,
         wal::{
             encoder::{
-                HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreRecord, decode_header,
+                HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreOp, decode_header,
                 decode_record, encode_append, encode_delete, encode_header, encode_touch,
             },
             error::WalError,
         },
     },
 };
+
+#[derive(Debug)]
+struct LogItem {
+    pub item: Item,
+    pub size_on_disk: u32,
+}
 
 const LOG_FILE_SYNC_DELAY: Duration = Duration::from_secs(1);
 
@@ -55,6 +61,8 @@ pub struct WriteAheadLog {
     failures: i32,
     has_pending_trim: bool,
     fail_threshold: i32,
+    live_size: u64,
+    live_records: HashMap<u64, LogItem>,
 }
 
 impl WriteAheadLog {
@@ -116,6 +124,8 @@ impl WriteAheadLog {
             failures: 0,
             has_pending_trim: false,
             last_written_without_sync: None,
+            live_records: HashMap::new(),
+            live_size: 0,
         })
     }
 
@@ -128,7 +138,7 @@ impl WriteAheadLog {
         let mut offset: usize = 0;
         let mut max_seq_seen = 0;
         while offset < bytes {
-            let (read, entry) = match decode_record(&buff[offset..], self.header.salt) {
+            let entry = match decode_record(&buff[offset..], self.header.salt) {
                 Ok(tuple) => tuple,
                 Err(e) => match e {
                     WalError::BadIdentifier
@@ -147,25 +157,25 @@ impl WriteAheadLog {
                     }
                     WalError::UnknownType((read, t)) => {
                         log_warn!("Encountered unknown entry type {t} - skipping.");
-                        offset += read;
+                        offset += read as usize;
                         continue;
                     }
                 },
             };
-            offset += read;
+            offset += entry.size_on_disk as usize;
 
-            match entry {
-                RestoreRecord::Insert(item) => {
+            match entry.op {
+                RestoreOp::Insert(item) => {
                     max_seq_seen = max(max_seq_seen, max(item.seq, item.id));
 
                     if let Some(old) = by_id.insert(item.id, item) {
                         log_warn!("Duplicate ID in WAL: {}", old.id);
                     }
                 }
-                RestoreRecord::Delete { id } => {
+                RestoreOp::Delete { id } => {
                     by_id.remove(&id);
                 }
-                RestoreRecord::Touch { id, seq, time_ms } => {
+                RestoreOp::Touch { id, seq, time_ms } => {
                     max_seq_seen = max(max_seq_seen, max(seq, id));
                     by_id.entry(id).and_modify(|e| {
                         e.seq = max(e.seq, seq);
@@ -263,12 +273,22 @@ impl WriteAheadLog {
         for item in sorted.into_iter() {
             let entry = Entry::restored(item.id, item.types, self.payloads.clone());
             by_key.entry(entry.key).or_insert(entry.id);
-            items.push(Item {
-                entry: Arc::from(entry),
+            let entry = Arc::from(entry);
+            let history_item = Item {
+                entry,
                 pinned: item.pinned,
                 seq: item.seq,
                 time_ms: item.time_ms,
-            });
+            };
+            self.live_records.insert(
+                history_item.entry.id,
+                LogItem {
+                    item: history_item.clone(),
+                    size_on_disk: item.size_on_disk,
+                },
+            );
+            self.live_size += item.size_on_disk as u64;
+            items.push(history_item);
         }
 
         log_debug!("Restored {} entries.", items.len());
@@ -359,20 +379,6 @@ impl WriteAheadLog {
     }
 
     fn handle_msg(&mut self, write_buf: &mut [u8], msg: LogMsg) -> Result<(), io::Error> {
-        if self.has_pending_trim {
-            if self.try_trim() {
-                log_info!("Recovered after pending trim");
-                self.has_pending_trim = false;
-            } else {
-                if let LogMsg::Delete(item) = &msg {
-                    log_warn!("Dropping files for Delete request while WAL trim is failing.");
-                    item.entry.drop_files();
-                }
-                return Err(io::Error::other(
-                    "WAL has a failing pending trim, skipping message.",
-                ));
-            }
-        }
         match &msg {
             LogMsg::Append(record) => self.append(record, write_buf),
             LogMsg::Delete(record) => self.delete(record, write_buf),
@@ -396,7 +402,19 @@ impl WriteAheadLog {
         self.sync_payload_files(record)?;
 
         let len = encode_append(record, self.header.salt, buf).map_err(io::Error::other)?;
-        self.write_to_log(len, buf)?;
+        self.live_records.insert(
+            record.entry.id,
+            LogItem {
+                item: record.clone(),
+                size_on_disk: 0,
+            },
+        );
+
+        self.write_to_log(len as usize, buf)?;
+        if let Some(l) = self.live_records.get_mut(&record.entry.id) {
+            l.size_on_disk = len;
+        }
+        self.live_size += len as u64;
         log_debug!("Processed WAL append - written {} bytes", len);
         Ok(())
     }
@@ -404,6 +422,10 @@ impl WriteAheadLog {
     fn delete(&mut self, entry: &Item, buf: &mut [u8]) -> Result<(), io::Error> {
         log_debug!("Processing WAL delete..");
         let len = encode_delete(entry.entry.id, self.header.salt, buf).map_err(io::Error::other)?;
+
+        let item = self.live_records.remove(&entry.entry.id);
+        self.live_size -= item.map_or_default(|i| i.size_on_disk) as u64;
+
         let res = self.write_to_log(len, buf);
 
         log_debug!("Dropping entry files..");
@@ -414,14 +436,36 @@ impl WriteAheadLog {
     }
 
     fn touch(&mut self, id: u64, seq: u64, time_ms: u64, buf: &mut [u8]) -> Result<(), io::Error> {
+        let Some(log_item) = self.live_records.get_mut(&id) else {
+            log_debug!(
+                "Touch for entry {id} not in the log (its payload sync probably failed), skipped"
+            );
+            return Ok(());
+        };
+
         let len =
             encode_touch(id, seq, time_ms, self.header.salt, buf).map_err(io::Error::other)?;
+
+        log_item.item.seq = seq;
+        log_item.item.time_ms = time_ms;
+
         self.write_to_log(len, buf)?;
         log_debug!("Processed WAL touch - written {} bytes", len);
         Ok(())
     }
 
     fn write_to_log(&mut self, len: usize, buf: &mut [u8]) -> Result<(), io::Error> {
+        if self.has_pending_trim {
+            if self.try_trim() {
+                log_info!("Recovered after pending trim");
+                self.has_pending_trim = false;
+            } else {
+                return Err(io::Error::other(
+                    "WAL has a failing pending trim, skipping message.",
+                ));
+            }
+        }
+
         self.log_file.write_all(&buf[..len])?;
         self.last_good_len += len as u64;
         self.last_written_without_sync
