@@ -13,7 +13,7 @@ const DEFAULT_DIR: &str = "XDG_STATE_HOME";
 const HOME_DIR: &str = "HOME";
 
 pub struct FsDataStore {
-    base: PathBuf,
+    base: Arc<Path>,
     payloads: Arc<Path>,
     lock: Option<File>,
 }
@@ -40,7 +40,7 @@ impl FsDataStore {
             .mode(0o700)
             .create(&payloads)?;
         Ok(FsDataStore {
-            base,
+            base: Arc::from(base),
             payloads: Arc::from(payloads),
             lock: None,
         })
@@ -69,8 +69,8 @@ impl FsDataStore {
         self.payloads.clone()
     }
 
-    pub fn wal_dir(&self) -> PathBuf {
-        self.base.join("wal.log")
+    pub fn wal_dir(&self) -> Arc<Path> {
+        self.base.clone()
     }
 
     // pub fn base_dir(&self) -> &Path {

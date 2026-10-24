@@ -336,6 +336,26 @@ impl Daemon {
         }
     }
 
+    /// Waits until a compaction has replaced `wal.log` (its salt is no longer `old_salt`) and
+    /// returns the records of the new log; `next_record` continues after them.
+    pub fn wait_compacted(&mut self, old_salt: u64) -> Vec<wal::Record> {
+        let start = Instant::now();
+        loop {
+            let bytes = fs::read(&self.wal).unwrap();
+            if bytes.len() >= wal::HEADER_LEN && wal::salt_of(&bytes) != old_salt {
+                let records = wal::records(&bytes);
+                self.seen = records.len();
+                return records;
+            }
+            let child = self.child.as_mut().unwrap().child();
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!("clipleafd exited ({status}) before compacting");
+            }
+            assert!(start.elapsed() < WAIT, "clipleafd never compacted");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// Waits for the next record the daemon writes to `wal.log`.
     pub fn next_record(&mut self) -> wal::Record {
         let start = Instant::now();

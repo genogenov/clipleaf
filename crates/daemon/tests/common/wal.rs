@@ -17,6 +17,11 @@ pub fn salt_of(wal: &[u8]) -> u64 {
     u64::from_le_bytes(wal[16..24].try_into().unwrap())
 }
 
+/// The header's seq_snapshot: every id and seq the next daemon hands out is at least this.
+pub fn seq_snapshot_of(wal: &[u8]) -> u64 {
+    u64::from_le_bytes(wal[24..32].try_into().unwrap())
+}
+
 pub fn header(version: u16, salt: u64) -> Vec<u8> {
     let mut h = IDENTIFIER.to_vec();
     h.extend(version.to_le_bytes());

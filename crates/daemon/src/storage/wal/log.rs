@@ -3,9 +3,9 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     hash::{BuildHasher, Hasher, RandomState},
-    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{self, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::{Path, PathBuf},
+    path::Path,
     sync::{
         Arc,
         mpsc::{self, Receiver, RecvError, RecvTimeoutError, Sender},
@@ -37,6 +37,10 @@ struct LogItem {
 }
 
 const LOG_FILE_SYNC_DELAY: Duration = Duration::from_secs(1);
+const COMPACT_ON_MIN_DEAD_RATIO: f32 = 1.0;
+const MIN_DEAD_SIZE_FOR_COMPACT: u64 = 1024 * 1024;
+const WAL_FILE_NAME: &str = "wal.log";
+const TMP_WAL_FILE_NAME: &str = "wal.log.tmp";
 
 #[derive(Debug)]
 pub enum LogMsg {
@@ -53,20 +57,35 @@ pub struct Restored {
 
 pub struct WriteAheadLog {
     log_file: File,
-    // wal_path: PathBuf,
+    base: Arc<Path>,
     payloads: Arc<Path>,
     header: Header,
     last_good_len: u64,
     last_written_without_sync: Option<Instant>,
-    failures: i32,
+    logged_failures: i32,
+    processing_failures: i32,
     has_pending_trim: bool,
-    fail_threshold: i32,
+    has_pending_compact: bool,
+    has_pending_dir_sync: bool,
+    fail_logging_threshold: i32,
     live_size: u64,
     live_records: HashMap<u64, LogItem>,
+    next_min_seq: u64,
 }
 
+// TODO: split, Result<..,WalError> control flow
+
 impl WriteAheadLog {
-    pub fn open(wal_path: PathBuf, payloads: Arc<Path>) -> io::Result<Self> {
+    pub fn open(base_dir: Arc<Path>, payloads: Arc<Path>) -> io::Result<Self> {
+        let tmp_wal_path = base_dir.join(TMP_WAL_FILE_NAME);
+        match fs::remove_file(&tmp_wal_path) {
+            Err(e) if e.kind() != ErrorKind::NotFound => {
+                log_warn!("Failed to remove stale temp WAL file: {e}")
+            }
+            _ => {}
+        };
+
+        let wal_path = base_dir.join(WAL_FILE_NAME);
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -114,19 +133,121 @@ impl WriteAheadLog {
             }
         }?;
         let pos = file.stream_position()?;
+        let next_min_seq = header.seq_snapshot;
         Ok(Self {
             // wal_path: wal_path,
             log_file: file,
+            base: base_dir,
             payloads,
             header,
             last_good_len: pos,
-            fail_threshold: 5,
-            failures: 0,
+            fail_logging_threshold: 5,
+            logged_failures: 0,
+            processing_failures: 0,
             has_pending_trim: false,
+            has_pending_compact: false,
+            has_pending_dir_sync: false,
             last_written_without_sync: None,
             live_records: HashMap::new(),
             live_size: 0,
+            next_min_seq,
         })
+    }
+
+    pub fn compact_if_necessary(&mut self) -> io::Result<bool> {
+        let dead_bytes = self.last_good_len - HEADER_LEN as u64 - self.live_size;
+        let dead_to_live_ratio = dead_bytes as f32 / self.live_size as f32;
+
+        let should_compact = self.has_pending_compact
+            || (dead_to_live_ratio >= COMPACT_ON_MIN_DEAD_RATIO
+                && dead_bytes >= MIN_DEAD_SIZE_FOR_COMPACT);
+        if should_compact {
+            log_debug!(
+                "WAL: dead to live ratio: {dead_to_live_ratio}, dead size:{dead_bytes}, has pending compact: {}. Starting compact..",
+                self.has_pending_compact
+            );
+            self.compact()?;
+        }
+        Ok(should_compact)
+    }
+
+    fn compact(&mut self) -> io::Result<()> {
+        let tmp_wal_path = self.base.join(TMP_WAL_FILE_NAME);
+        match fs::remove_file(&tmp_wal_path) {
+            Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
+            _ => {}
+        };
+        let tmp_file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .append(true)
+            .mode(0o600)
+            .open(&tmp_wal_path)?;
+
+        if let Err(e) = self.write_tmp_wal_and_swap(&tmp_wal_path, tmp_file) {
+            if let Err(re) = fs::remove_file(&tmp_wal_path) {
+                log_warn!("failed to remove {}: {re}", tmp_wal_path.display());
+            }
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    fn write_tmp_wal_and_swap(
+        &mut self,
+        tmp_wal_path: &Path,
+        mut tmp_file: File,
+    ) -> io::Result<()> {
+        let mut header_buff = [0; HEADER_LEN];
+        let mut record_buff = vec![0; MAX_RECORD_LEN as usize];
+        let new_header = encode_new_header(&mut header_buff, self.next_min_seq);
+        let mut writer = BufWriter::with_capacity(1024 * 64, tmp_file);
+        writer.write_all(&header_buff)?;
+        let mut new_live_map = HashMap::with_capacity(self.live_records.capacity());
+        let mut new_live_size: u64 = 0;
+        for item in self.live_records.values() {
+            match encode_append(&item.item, new_header.salt, &mut record_buff) {
+                Ok(len) => {
+                    writer.write_all(&record_buff[..len as usize])?;
+                    new_live_map.insert(
+                        item.item.entry.id,
+                        LogItem {
+                            item: item.item.clone(),
+                            size_on_disk: len,
+                        },
+                    );
+                    new_live_size += len as u64;
+                }
+                Err(e) => {
+                    log_warn!("Failed to write entry to WAL during compact, skipping: {e}");
+                }
+            }
+        }
+
+        writer.flush()?;
+        tmp_file = writer.into_inner()?;
+        tmp_file.sync_data()?;
+
+        let new_size = tmp_file.stream_position()?;
+
+        fs::rename(tmp_wal_path, self.base.join(WAL_FILE_NAME))?;
+        self.log_file = tmp_file;
+        self.header = new_header;
+        self.last_written_without_sync = None;
+        self.last_good_len = new_size;
+        self.live_records = new_live_map;
+        self.live_size = new_live_size;
+        self.has_pending_compact = false;
+        self.has_pending_trim = false;
+        self.processing_failures = 0;
+
+        if let Err(e) = self.sync_dir() {
+            log_warn!("Failed dir sync after compact. Will retry on next log file sync: {e}");
+            self.has_pending_dir_sync = true;
+            self.last_written_without_sync = Some(Instant::now());
+        }
+        Ok(())
     }
 
     pub fn restore(&mut self) -> io::Result<Restored> {
@@ -292,10 +413,11 @@ impl WriteAheadLog {
         }
 
         log_debug!("Restored {} entries.", items.len());
+        self.next_min_seq = max(self.header.seq_snapshot, next_seq);
         Ok(Restored {
             items,
             by_key,
-            next_seq: max(self.header.seq_snapshot, next_seq),
+            next_seq: self.next_min_seq,
         })
     }
 
@@ -311,71 +433,113 @@ impl WriteAheadLog {
     fn run(mut self, rx: Receiver<LogMsg>) {
         let mut write_buf = vec![0u8; MAX_RECORD_LEN as usize];
 
+        if let Err(e) = self.compact_if_necessary() {
+            self.handle_processing_result(Err(e));
+        }
+
         while let Ok(msg) = self.receive_msg(&rx) {
             log_debug!("Processing WAL msg: {:?}", msg);
             let res = self.handle_msg(&mut write_buf, msg);
-            self.handle_msg_processing_result(res);
+            self.handle_processing_result(res);
+            if let Err(e) = self.compact_if_necessary() {
+                self.handle_processing_result(Err(e));
+            }
         }
 
         // disconnected
         if self.last_written_without_sync.is_some() {
-            self.sync_log_file();
+            self.sync_state_files();
         }
     }
 
-    fn handle_msg_processing_result(&mut self, res: io::Result<()>) {
+    fn handle_processing_result(&mut self, res: io::Result<()>) {
         match res {
             Err(e) => {
-                if self.failures < self.fail_threshold {
-                    log_error!("An error occurred while processing WAL msg: {e}");
-                } else if self.failures == self.fail_threshold {
-                    log_error!(
-                        "An error occurred while processing WAL msg, and errors count reached the configured threshold, silencing until reccovery: {e}"
-                    );
-                }
-                self.failures += 1;
+                self.log_msg_processing_error(e);
+                self.processing_failures += 1;
                 if !self.has_pending_trim && !self.try_trim() {
                     self.has_pending_trim = true;
                 }
             }
-            Ok(()) if self.failures > 0 => {
-                log_warn!(
-                    "WAL writes recovered after {} failed records",
-                    self.failures
-                );
-                self.failures = 0;
+            Ok(()) => {
+                if self.logged_failures > 0 {
+                    log_info!(
+                        "WAL writes recovered after {} failed records",
+                        self.logged_failures
+                    );
+                    self.logged_failures = 0;
+                    if self.processing_failures > 0 {
+                        self.has_pending_compact = true;
+                    }
+                    self.processing_failures = 0;
+                }
             }
-            Ok(()) => {}
         }
+    }
+
+    fn log_msg_processing_error(&mut self, e: io::Error) {
+        if self.logged_failures < self.fail_logging_threshold {
+            log_error!("An error occurred while processing WAL msg: {e}");
+        } else if self.logged_failures == self.fail_logging_threshold {
+            log_error!(
+                "An error occurred while processing WAL msg, and errors count reached the configured threshold, silencing until reccovery: {e}"
+            );
+        }
+        self.logged_failures += 1;
     }
 
     fn receive_msg(&mut self, rx: &Receiver<LogMsg>) -> Result<LogMsg, RecvError> {
-        let Some(last) = self.last_written_without_sync else {
-            return rx.recv();
-        };
+        loop {
+            let Some(last) = self.last_written_without_sync else {
+                return rx.recv();
+            };
 
-        let timeout = LOG_FILE_SYNC_DELAY.saturating_sub(last.elapsed());
-        if timeout.is_zero() {
-            self.sync_log_file();
-            return rx.recv();
-        }
-        match rx.recv_timeout(timeout) {
-            Ok(val) => Ok(val),
-            Err(RecvTimeoutError::Timeout) => {
-                self.sync_log_file();
-                rx.recv()
+            let timeout = LOG_FILE_SYNC_DELAY.saturating_sub(last.elapsed());
+            if timeout.is_zero() {
+                self.sync_state_files();
+                continue;
             }
-            Err(RecvTimeoutError::Disconnected) => Err(RecvError),
+            match rx.recv_timeout(timeout) {
+                Ok(val) => return Ok(val),
+                Err(RecvTimeoutError::Timeout) => {
+                    self.sync_state_files();
+                }
+                Err(RecvTimeoutError::Disconnected) => return Err(RecvError),
+            }
         }
     }
 
-    fn sync_log_file(&mut self) {
+    fn sync_state_files(&mut self) {
+        let mut should_rearm = false;
+
         if let Err(e) = self.log_file.sync_data() {
-            self.handle_msg_processing_result(Err(e));
+            self.log_msg_processing_error(e);
+            should_rearm = true;
+            // if syncdata fails, the kernel might mark the pages clean,
+            // and the next time we try sync_data it might succeed, even tho the pages are dropped and not written.
+            self.has_pending_compact = true;
+            if let Err(e) = self.compact_if_necessary() {
+                self.handle_processing_result(Err(e));
+            }
         } else {
-            self.last_written_without_sync = None;
             log_debug!("Synced WAL log file");
         }
+
+        if self.has_pending_dir_sync {
+            if let Err(e) = self.sync_dir() {
+                self.log_msg_processing_error(e);
+                should_rearm = true;
+            } else {
+                self.has_pending_dir_sync = false;
+                log_debug!("Synced WAL dir");
+            }
+        }
+
+        self.last_written_without_sync = should_rearm.then(Instant::now);
+    }
+
+    fn sync_dir(&mut self) -> io::Result<()> {
+        OpenOptions::new().read(true).open(&self.base)?.sync_all()
     }
 
     fn handle_msg(&mut self, write_buf: &mut [u8], msg: LogMsg) -> Result<(), io::Error> {
@@ -415,6 +579,10 @@ impl WriteAheadLog {
             l.size_on_disk = len;
         }
         self.live_size += len as u64;
+        self.next_min_seq = max(
+            self.next_min_seq,
+            record.seq.max(record.entry.id).saturating_add(1),
+        );
         log_debug!("Processed WAL append - written {} bytes", len);
         Ok(())
     }
@@ -450,6 +618,7 @@ impl WriteAheadLog {
         log_item.item.time_ms = time_ms;
 
         self.write_to_log(len, buf)?;
+        self.next_min_seq = max(self.next_min_seq, seq.max(id).saturating_add(1));
         log_debug!("Processed WAL touch - written {} bytes", len);
         Ok(())
     }
@@ -491,17 +660,22 @@ fn random_salt() -> u64 {
 fn reset_wal(file: &mut File) -> io::Result<Header> {
     file.set_len(0)?;
     file.rewind()?;
-    write_new_header(file)
+    write_new_header(file, 1)
 }
 
-fn write_new_header(file: &mut File) -> io::Result<Header> {
+fn write_new_header(file: &mut File, seq_snapshot: u64) -> io::Result<Header> {
     log_debug!("Writing new WAL header..");
     let mut buff = [0u8; HEADER_LEN];
-    let header = Header {
-        salt: random_salt(),
-        seq_snapshot: 1,
-    };
-    encode_header(&header, &mut buff);
+    let header = encode_new_header(&mut buff, seq_snapshot);
     file.write_all(&buff)?;
     Ok(header)
+}
+
+fn encode_new_header(buf: &mut [u8; HEADER_LEN], seq_snapshot: u64) -> Header {
+    let header = Header {
+        salt: random_salt(),
+        seq_snapshot,
+    };
+    encode_header(&header, buf);
+    header
 }
