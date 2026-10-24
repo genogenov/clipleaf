@@ -77,6 +77,23 @@ impl StateDir {
     }
 
     /// `(name, size)` of every entry in `payloads/`, sorted by entry id, then type number.
+    /// Appends `total` bytes of records of an unknown type (dead bytes: the replay skips them,
+    /// a compaction drops them), in pieces well under the 256 KiB record limit.
+    pub fn append_dead(&self, mut total: u64) {
+        const RECORD_OVERHEAD: u64 = 4 + 1 + 8; // len + type + checksum
+        let salt = wal::salt_of(&self.wal_bytes());
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(self.wal())
+            .unwrap();
+        while total > 0 {
+            let piece = total.min(200 * 1024);
+            let body = vec![0u8; (piece - RECORD_OVERHEAD) as usize];
+            file.write_all(&wal::record(salt, 99, &body)).unwrap();
+            total -= piece;
+        }
+    }
+
     pub fn payload_files(&self) -> Vec<(String, u64)> {
         let mut files: Vec<_> = fs::read_dir(self.payloads())
             .unwrap()

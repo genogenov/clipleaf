@@ -5,7 +5,7 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
 use crate::{
     index::Item,
-    storage::{Data, MAX_FETCHED_TYPES, PayloadFile, TypeData, wal::error::WalError},
+    storage::{Data, MAX_FETCHED_TYPES, PayloadFile, TypeData, TypeMeta, wal::error::WalError},
 };
 
 pub const IDENTIFIER: [u8; 14] = *b"CLIPLEAF WAL\0\0";
@@ -275,7 +275,7 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
     let (has_file, rest) = read_bool(rest)?;
     let (file_seq, rest) = read_u32(rest)?;
     let (head_len, rest) = read_u32(rest)?;
-    let (head, _) = rest
+    let (head, rest) = rest
         .split_at_checked(head_len as usize)
         .ok_or(WalError::Corrupted)?;
 
@@ -284,21 +284,32 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
         false => Data::Inline(Arc::from(head)),
     };
 
-    let offset = 4 + mime_len + 8 + 16 + 1 + 4 + 4 + head_len;
+    let (meta_byte, rest) = read_u8(rest)?;
+    let (meta, rest) = match meta_byte {
+        1 => {
+            let (file_count, rest) = read_u32(rest)?;
+            (Some(TypeMeta::FileList { items: file_count }), rest)
+        }
+        0 => (None, rest),
+        _ => return Err(WalError::Corrupted),
+    };
+
+    let offset = buff.len() - rest.len();
 
     Ok((
-        offset as usize,
-        &buff[offset as usize..],
+        offset,
+        &buff[offset..],
         TypeData {
             data,
             mime: classify_mime(mime),
             hash,
             size,
+            meta,
         },
     ))
 }
 
-/// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes
+/// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes, type meta byte, type metadata
 fn encode_stored_type_data(
     t: &TypeData,
     offset: &mut usize,
@@ -332,6 +343,16 @@ fn encode_stored_type_data(
     if let Some(head_bytes) = head {
         encode_with_size_check(offset, buff, &head_bytes)?;
     }
+
+    match &t.meta {
+        Some(meta) => match meta {
+            TypeMeta::FileList { items } => {
+                encode_with_size_check(offset, buff, &1u8.to_le_bytes())?;
+                encode_with_size_check(offset, buff, &items.to_le_bytes())?;
+            }
+        },
+        None => encode_with_size_check(offset, buff, &0u8.to_le_bytes())?,
+    };
 
     let len = *offset - original;
 

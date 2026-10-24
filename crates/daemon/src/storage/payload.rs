@@ -8,10 +8,10 @@ use std::{
     sync::Arc,
 };
 
-use clipleaf_core::{Mime, MimeKind, log_debug, log_error};
+use clipleaf_core::{FileListScan, Mime, MimeKind, log_debug, log_error};
 use xxhash_rust::xxh3::Xxh3;
 
-use crate::storage::{Data, EntryBuilder, MAX_INLINE_TYPE_BYTES, TypeData};
+use crate::storage::{Data, EntryBuilder, MAX_INLINE_TYPE_BYTES, TypeData, TypeMeta};
 
 pub struct PayloadFile {
     pub(super) head: Option<Arc<[u8]>>,
@@ -28,6 +28,7 @@ pub struct PayloadWriter {
     pub(super) head: Option<Vec<u8>>,
     pub(super) hasher: Xxh3,
     pub(super) file: Option<(PayloadFile, File)>,
+    pub(super) filescan: Option<FileListScan>,
 }
 
 impl PayloadWriter {
@@ -58,6 +59,9 @@ impl PayloadWriter {
             };
             file.1.write_all(rest)?;
         }
+        if let Some(scan) = &mut self.filescan {
+            scan.feed(buff);
+        }
         self.size += buff.len() as u64;
         Ok(())
     }
@@ -75,6 +79,7 @@ impl PayloadWriter {
             MimeKind::Image => false,
             MimeKind::Other => false,
             MimeKind::Password => false,
+            MimeKind::FileModifier => false,
         };
         let data = TypeData {
             hash: self.hasher.digest128(),
@@ -89,6 +94,10 @@ impl PayloadWriter {
                     Data::File(f.0)
                 }
             },
+            meta: self
+                .filescan
+                .take()
+                .map(|s| TypeMeta::FileList { items: s.finish() }),
         };
 
         builder.entry.pending_types[self.file_seqnum] = Some(data);

@@ -6,33 +6,13 @@
 
 mod common;
 
-use std::{
-    collections::HashMap,
-    fs::{self, OpenOptions},
-    io::Write,
-};
+use std::{collections::HashMap, fs};
 
 use common::{wal::*, *};
 
 const MIB: u64 = 1024 * 1024;
 /// len + type + id + seq + time_ms + checksum.
 const TOUCH_LEN: u64 = 4 + 1 + 3 * 8 + 8;
-/// Record overhead around the body: len + type + checksum.
-const RECORD_OVERHEAD: u64 = 4 + 1 + 8;
-
-/// Appends `total` bytes of unknown records (dead bytes) to the log, in pieces well under the
-/// 256 KiB record limit.
-fn append_dead(state: &StateDir, mut total: u64) {
-    let salt = salt_of(&state.wal_bytes());
-    let mut file = OpenOptions::new().append(true).open(state.wal()).unwrap();
-    while total > 0 {
-        let piece = total.min(200 * 1024);
-        let body = vec![0u8; (piece - RECORD_OVERHEAD) as usize];
-        file.write_all(&record(salt, 99, &body)).unwrap();
-        total -= piece;
-    }
-}
-
 /// More than the 5 KiB inline limit, so the type is kept in a payload file.
 fn big(seed: u8) -> Vec<u8> {
     (0..6000u32).map(|i| (i % 251) as u8 ^ seed).collect()
@@ -64,7 +44,7 @@ fn a_log_that_is_mostly_dead_is_rewritten_at_startup_as_its_live_entries() {
         panic!("expected a Touch");
     };
     daemon.stop();
-    append_dead(&state, MIB + 4096);
+    state.append_dead(MIB + 4096);
     let old_salt = salt_of(&state.wal_bytes());
 
     let mut daemon = Daemon::start_in(&state);
@@ -102,7 +82,7 @@ fn a_running_daemon_compacts_once_the_dead_bytes_reach_1_mib() {
     let a = daemon.copy_new(&text(b"first"));
     daemon.stop();
     // One Touch short of 1 MiB dead: the Touch of a duplicate below makes it exactly 1 MiB.
-    append_dead(&state, MIB - TOUCH_LEN);
+    state.append_dead(MIB - TOUCH_LEN);
     let old_salt = salt_of(&state.wal_bytes());
 
     let mut daemon = Daemon::start_in(&state);

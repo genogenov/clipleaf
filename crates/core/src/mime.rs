@@ -23,12 +23,10 @@ pub mod types {
 
     pub const PREFERRED_TXT_LIKE_MIME_TYPES: [&str; 2] = [TEXT_HTML, TEXT_MARKDOWN];
 
-    pub const PREFERRED_FILE_LIST_MIME_TYPES: [&str; 4] = [
-        TEXT_URI_LIST,
-        KDE_URI_LIST,
-        KDE_CUT_MARKER,
-        GNOME_COPIED_FILES,
-    ];
+    pub const PREFERRED_FILE_LIST_MIME_TYPES: [&str; 3] =
+        [TEXT_URI_LIST, KDE_URI_LIST, GNOME_COPIED_FILES];
+
+    pub const FILE_MIME_MODIFIER_TYPES: [&str; 1] = [KDE_CUT_MARKER];
 
     pub const PREFERRED_IMAGE_MIME_TYPES: [&str; 1] = [IMAGE_PNG];
 
@@ -63,6 +61,7 @@ pub enum MimeKind {
     Image,
     Other,
     Password,
+    FileModifier,
 }
 
 #[derive(Debug)]
@@ -140,6 +139,12 @@ where
             rank: Some(r),
             mime: m,
         }
+    } else if let Some(r) = position(&types::FILE_MIME_MODIFIER_TYPES, str) {
+        Mime {
+            kind: MimeKind::FileModifier,
+            rank: Some(r),
+            mime: m,
+        }
     } else if str == types::TEXT_PLAIN_UTF16 {
         Mime {
             kind: MimeKind::TextExtended,
@@ -182,8 +187,9 @@ pub fn pick_best_mime<S: AsRef<str>>(mimes: &[S]) -> Option<Mime<&S>> {
 }
 
 pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) -> Vec<Mime<S>> {
-    let (mut alias, mut image) = (None::<Mime<&S>>, None::<Mime<&S>>);
+    let (mut text, mut image) = (None::<Mime<&S>>, None::<Mime<&S>>);
     let mut files = Vec::new();
+    let mut file_modifier = None::<Mime<&S>>;
     // let mut rest = Vec::new();
     for m in mimes.iter() {
         match classify_mime(m) {
@@ -195,9 +201,9 @@ pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) ->
                 if (kind == MimeKind::Text
                     || kind == MimeKind::TextLike
                     || kind == MimeKind::TextExtended)
-                    && alias.as_ref().is_none_or(|a| k.is_preferred(a)) =>
+                    && text.as_ref().is_none_or(|a| k.is_preferred(a)) =>
             {
-                alias = Some(k)
+                text = Some(k)
             }
             k @ Mime { kind, .. }
                 if kind == MimeKind::Image && image.as_ref().is_none_or(|b| k.is_preferred(b)) =>
@@ -208,17 +214,30 @@ pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) ->
                 kind: MimeKind::FileList,
                 ..
             } => files.push(k),
+            k @ Mime {
+                kind: MimeKind::FileModifier,
+                ..
+            } if file_modifier.as_ref().is_none_or(|a| k.is_preferred(a)) => {
+                file_modifier = Some(k)
+            }
             // MimeKind::Other => rest.push(i),
             _ => {} // a lower-ranked alias or image
         }
     }
-    let result: Vec<Mime<S>> = alias
+    let modifier = file_modifier.filter(|_| !files.is_empty());
+    let cap = cap_known.saturating_sub(usize::from(modifier.is_some()));
+    let mut result: Vec<Mime<S>> = text
         .into_iter()
         .chain(image)
         .chain(files)
-        .take(cap_known)
+        .take(cap)
         .map(|m| m.as_cloned_mime())
         .collect();
+    if let Some(modifier) = modifier
+        && result.iter().any(|m| m.kind == MimeKind::FileList)
+    {
+        result.push(modifier.as_cloned_mime());
+    }
 
     log_debug!("Picked {} fetch MIMEs out of {}", result.len(), mimes.len());
     result

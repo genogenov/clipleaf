@@ -4,6 +4,10 @@
 //! Header (40 bytes): identifier (14) | version u16 | salt u64 | seq_snapshot u64 | xxh3_64 of
 //! the first 32 bytes. Record: len u32 (covers len + type + body) | type u8 | body |
 //! xxh3_64_with_seed(first len bytes, salt). All little-endian.
+//!
+//! An Insert body: id u64 | seq u64 | time_ms u64 | pinned u8 | type count u32, then per type:
+//! mime len u32 | mime | size u64 | hash u128 | in_file u8 | file seq u32 | head len u32 | head |
+//! meta tag u8 (0 none, 1 file list: then its item count u32).
 
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
@@ -66,6 +70,9 @@ pub struct Stored {
     pub size: u64,
     pub in_file: bool,
     pub head: Vec<u8>,
+    /// The item count of a file list (`text/uri-list`, KDE's, GNOME's), counted over all its
+    /// bytes, not just the head.
+    pub items: Option<u32>,
 }
 
 impl Insert {
@@ -121,12 +128,21 @@ fn next_record(buf: &[u8], salt: u64) -> Option<(Record, &[u8])> {
                 let _file_seq = body.u32()?;
                 let head_len = body.u32()? as usize;
                 let head = body.take(head_len)?.to_vec();
+                let items = match body.take(1)?[0] {
+                    0 => None,
+                    1 => Some(body.u32()?),
+                    _ => return None,
+                };
                 types.push(Stored {
                     mime,
                     size,
                     in_file,
                     head,
+                    items,
                 });
+            }
+            if !body.0.is_empty() {
+                return None; // the types must cover the body exactly
             }
             Record::Insert(Insert { id, seq, types })
         }

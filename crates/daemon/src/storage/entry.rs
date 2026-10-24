@@ -7,7 +7,9 @@ use std::{
     sync::Arc,
 };
 
-use clipleaf_core::{Mime, MimeKind, log_error, mime_types::TEXT_PLAIN};
+use clipleaf_core::{
+    FileListFormat, FileListScan, Mime, MimeKind, log_error, mime_types::TEXT_PLAIN,
+};
 use xxhash_rust::xxh3::Xxh3;
 
 use crate::storage::{MAX_INLINE_TYPE_BYTES, PayloadFile, PayloadWriter};
@@ -28,6 +30,12 @@ pub struct TypeData {
     pub size: u64,
     pub hash: u128,
     pub data: Data,
+    pub meta: Option<TypeMeta>,
+}
+
+#[derive(Debug)]
+pub enum TypeMeta {
+    FileList { items: u32 },
 }
 
 pub enum Data {
@@ -65,7 +73,7 @@ impl EntryBuilder {
     pub fn payload(&mut self, mime: Mime<Cow<'static, str>>) -> PayloadWriter {
         self.entry.pending_types.push(None);
         let seqnum = self.entry.pending_types.len() - 1;
-
+        let scanner = FileListFormat::from_mime(mime.mime()).map(FileListScan::new);
         PayloadWriter {
             file: None,
             hasher: Xxh3::new(),
@@ -75,6 +83,7 @@ impl EntryBuilder {
             file_path_base: self.entry.payloads_dir.clone(),
             mime: Some(mime),
             size: 0,
+            filescan: scanner,
         }
     }
 

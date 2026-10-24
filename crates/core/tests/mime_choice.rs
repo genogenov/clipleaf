@@ -1,10 +1,15 @@
 //! Which types `paste` picks by default (`pick_best_mime`) and which ones the daemon fetches
-//! (`pick_fetch_mimes`): the best text, the best image, and every file-list type.
+//! (`pick_fetch_mimes`): the best text, the best image, every file-list type, and the KDE cut
+//! marker whenever a file list is fetched.
 
 use clipleaf_core::{pick_best_mime, pick_fetch_mimes};
 
 fn fetch(offered: &[&'static str]) -> Vec<&'static str> {
-    pick_fetch_mimes(offered, 10)
+    fetch_capped(offered, 10)
+}
+
+fn fetch_capped(offered: &[&'static str], cap: usize) -> Vec<&'static str> {
+    pick_fetch_mimes(offered, cap)
         .iter()
         .map(|m| *m.mime())
         .collect()
@@ -48,7 +53,7 @@ fn any_image_is_fetched_when_there_is_no_png() {
 }
 
 #[test]
-fn every_file_list_type_is_fetched_after_the_text_so_file_copies_restore() {
+fn every_file_list_type_is_fetched_after_the_text_and_the_cut_marker_last() {
     // What a file manager offers (Nautilus / Dolphin), in their order.
     let offered = [
         "x-special/gnome-copied-files",
@@ -64,11 +69,60 @@ fn every_file_list_type_is_fetched_after_the_text_so_file_copies_restore() {
         [
             "text/plain;charset=utf-8",
             "x-special/gnome-copied-files",
-            "application/x-kde-cutselection",
             "text/uri-list",
             "application/x-kde4-urilist",
+            "application/x-kde-cutselection",
         ]
     );
+}
+
+#[test]
+fn the_cut_marker_is_never_fetched_without_a_file_list() {
+    // Alone it is a flag of nothing: a stored list without it would restore a cut as a copy.
+    assert_eq!(
+        fetch(&["application/x-kde-cutselection", "text/plain"]),
+        ["text/plain"]
+    );
+    // Nor does it take a slot from the types that are fetched.
+    let offered = ["text/plain", "application/x-kde-cutselection", "image/png"];
+    assert_eq!(fetch_capped(&offered, 2), ["text/plain", "image/png"]);
+}
+
+#[test]
+fn under_a_tight_cap_a_fetched_file_list_keeps_its_cut_marker() {
+    let offered = [
+        "text/plain;charset=utf-8",
+        "x-special/gnome-copied-files",
+        "application/x-kde-cutselection",
+        "text/uri-list",
+        "image/png",
+    ];
+    assert_eq!(
+        fetch_capped(&offered, 3),
+        ["text/plain;charset=utf-8", "image/png"]
+    );
+    assert_eq!(
+        fetch_capped(&offered, 4),
+        [
+            "text/plain;charset=utf-8",
+            "image/png",
+            "x-special/gnome-copied-files",
+            "application/x-kde-cutselection",
+        ]
+    );
+    for cap in 5..=6 {
+        assert_eq!(
+            fetch_capped(&offered, cap),
+            [
+                "text/plain;charset=utf-8",
+                "image/png",
+                "x-special/gnome-copied-files",
+                "text/uri-list",
+                "application/x-kde-cutselection",
+            ],
+            "cap {cap}"
+        );
+    }
 }
 
 #[test]
