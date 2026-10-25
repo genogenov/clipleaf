@@ -15,6 +15,8 @@ pub mod types {
     pub const GNOME_COPIED_FILES: &str = "x-special/gnome-copied-files";
     pub const KDE_PASSWDMANAGER_HINT: &str = "x-kde-passwordManagerHint";
     pub const IMAGE_PNG: &str = "image/png";
+    pub const IMAGE_JPEG: &str = "image/jpeg";
+
     pub const KDE_CUT_MARKER: &str = "application/x-kde-cutselection";
     pub const KDE_URI_LIST: &str = "application/x-kde4-urilist";
 
@@ -28,9 +30,9 @@ pub mod types {
 
     pub const FILE_MIME_MODIFIER_TYPES: [&str; 1] = [KDE_CUT_MARKER];
 
-    pub const PREFERRED_IMAGE_MIME_TYPES: [&str; 1] = [IMAGE_PNG];
+    pub const PREFERRED_IMAGE_MIME_TYPES: [&str; 2] = [IMAGE_PNG, IMAGE_JPEG];
 
-    pub const KNOWN_MIME_TYPES: [&str; 14] = [
+    pub const KNOWN_MIME_TYPES: [&str; 15] = [
         // text
         TEXT_PLAIN_UTF8,
         UTF8_STRING,
@@ -42,6 +44,7 @@ pub mod types {
         TEXT_MARKDOWN,
         //image
         IMAGE_PNG,
+        IMAGE_JPEG,
         //file,
         GNOME_COPIED_FILES,
         TEXT_URI_LIST,
@@ -64,7 +67,7 @@ pub enum MimeKind {
     FileModifier,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Mime<T: AsRef<str>> {
     rank: Option<usize>,
     kind: MimeKind,

@@ -9,10 +9,10 @@ use std::{
     thread,
 };
 
-use clipleaf_core::{log_debug, log_error};
+use clipleaf_core::{log_debug, log_error, log_warn};
 
 use crate::storage::{
-    Entry,
+    Entry, TypeMeta,
     wal::log::{LogMsg, Restored},
 };
 
@@ -21,6 +21,13 @@ pub enum IndexMsg {
         seq: u64,
         time_ms: u64,
         entry: Entry,
+    },
+
+    #[allow(dead_code)]
+    SetThumb {
+        id: u64,
+        type_index: u32,
+        meta: TypeMeta,
     },
 }
 
@@ -69,6 +76,11 @@ impl Index {
                     time_ms,
                     entry,
                 } => self.insert(seq, time_ms, entry),
+                IndexMsg::SetThumb {
+                    id,
+                    type_index,
+                    meta,
+                } => self.set_thumb(id, type_index, meta),
             }
         }
     }
@@ -140,6 +152,46 @@ impl Index {
         }
 
         log_debug!("Total entries {:?}.", items.len());
+        self.publish(items);
+    }
+
+    fn set_thumb(&mut self, id: u64, type_index: u32, meta: TypeMeta) {
+        let Some(pos) = self.current.items.iter().position(|i| i.entry.id == id) else {
+            log_debug!(
+                "Item with ID {id} not found in current items - possibly evicted - dropping set thumb msg"
+            );
+            return;
+        };
+
+        let mut items = self.current.items.clone();
+
+        let Some(item) = items.get_mut(pos) else {
+            return;
+        };
+        let Some(entry) = item
+            .entry
+            .clone_with_meta_as_committed(type_index as usize, meta)
+        else {
+            log_warn!(
+                "Could not clone entry with ID {id} and type index {type_index} for set_thumb - dropping set thumb msg"
+            );
+            return;
+        };
+
+        *item = Item {
+            seq: item.seq,
+            time_ms: item.time_ms,
+            pinned: item.pinned,
+            entry: Arc::new(entry),
+        };
+
+        if let Err(e) = self.log_sender.send(LogMsg::Thumb {
+            item: item.clone(),
+            type_index,
+        }) {
+            log_error!("Failed sending message to WAL: {e}");
+        }
+
         self.publish(items);
     }
 

@@ -5,7 +5,9 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
 use crate::{
     index::Item,
-    storage::{Data, MAX_FETCHED_TYPES, PayloadFile, TypeData, TypeMeta, wal::error::WalError},
+    storage::{
+        Data, MAX_FETCHED_TYPES, PayloadFile, ThumbNail, TypeData, TypeMeta, wal::error::WalError,
+    },
 };
 
 pub const IDENTIFIER: [u8; 14] = *b"CLIPLEAF WAL\0\0";
@@ -15,6 +17,13 @@ pub const VERSION: u16 = 1;
 pub const HEADER_LEN: usize = size_of_val(&IDENTIFIER) + size_of_val(&VERSION) + 8 + 8 + 8;
 
 pub const MAX_RECORD_LEN: u32 = 256 * 1024;
+
+pub const NO_META: u8 = 0;
+pub const META_TYPE_FILELIST: u8 = 1;
+pub const META_TYPE_THUMB_PRESENT: u8 = 2;
+pub const META_TYPE_THUMB_UNAVAILABLE: u8 = 3;
+pub const THUMB_FMT_JPEG: u8 = 1;
+pub const MAX_THUMB_BYTES: u32 = 128 * 1024;
 
 pub struct Header {
     pub salt: u64,
@@ -29,8 +38,19 @@ pub struct RestoreRecord {
 #[derive(Debug)]
 pub enum RestoreOp {
     Insert(RestoreItem),
-    Delete { id: u64 },
-    Touch { id: u64, seq: u64, time_ms: u64 },
+    Delete {
+        id: u64,
+    },
+    Touch {
+        id: u64,
+        seq: u64,
+        time_ms: u64,
+    },
+    Thumb {
+        id: u64,
+        type_index: u32,
+        meta: TypeMeta,
+    },
 }
 
 #[derive(Debug)]
@@ -46,6 +66,7 @@ pub struct RestoreItem {
 const INSERT_TYPE: u8 = 1;
 const DELETE_TYPE: u8 = 2;
 const TOUCH_TYPE: u8 = 3;
+const THUMB_TYPE: u8 = 4;
 
 pub fn encode_header(h: &Header, buff: &mut [u8; HEADER_LEN]) {
     let mut offset = 0;
@@ -157,6 +178,31 @@ pub fn encode_touch(
     Ok(offset + 8)
 }
 
+pub fn encode_thumb(
+    id: u64,
+    type_index: u32,
+    meta: &TypeMeta,
+    salt: u64,
+    buff: &mut [u8],
+) -> Result<usize, WalError> {
+    let t: u8 = THUMB_TYPE;
+    let mut offset = 4; // the len
+
+    // type
+    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
+    encode_with_size_check(&mut offset, buff, &id.to_le_bytes())?;
+    encode_with_size_check(&mut offset, buff, &type_index.to_le_bytes())?;
+
+    encode_type_meta(&Some(meta), &mut offset, buff)?;
+
+    if offset as u32 > MAX_RECORD_LEN {
+        return Err(WalError::Corrupted);
+    }
+
+    encode_len_and_checksum(offset as u32, salt, buff)?;
+    Ok(offset + 8)
+}
+
 pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
     let (len, _rest) = read_u32(buff)?;
 
@@ -242,6 +288,24 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
                 op: RestoreOp::Touch { id, seq, time_ms },
             })
         }
+        THUMB_TYPE => {
+            let (id, rest) = read_u64(rest)?;
+            let (type_index, rest) = read_u32(rest)?;
+            let (meta, _) = decode_type_meta(rest)?;
+
+            let Some(meta) = meta else {
+                return Err(WalError::Corrupted);
+            };
+
+            Ok(RestoreRecord {
+                size_on_disk: total_len,
+                op: RestoreOp::Thumb {
+                    id,
+                    type_index,
+                    meta,
+                },
+            })
+        }
         t => Err(WalError::UnknownType((total_len, t))),
     }
 }
@@ -284,16 +348,7 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
         false => Data::Inline(Arc::from(head)),
     };
 
-    let (meta_byte, rest) = read_u8(rest)?;
-    let (meta, rest) = match meta_byte {
-        1 => {
-            let (file_count, rest) = read_u32(rest)?;
-            (Some(TypeMeta::FileList { items: file_count }), rest)
-        }
-        0 => (None, rest),
-        _ => return Err(WalError::Corrupted),
-    };
-
+    let (meta, rest) = decode_type_meta(rest)?;
     let offset = buff.len() - rest.len();
 
     Ok((
@@ -309,7 +364,56 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
     ))
 }
 
-/// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes, type meta byte, type metadata
+fn decode_type_meta(buff: &[u8]) -> Result<(Option<TypeMeta>, &[u8]), WalError> {
+    let (meta_byte, rest) = read_u8(buff)?;
+    let (meta, rest) = match meta_byte {
+        META_TYPE_FILELIST => {
+            let (file_count, rest) = read_u32(rest)?;
+            (Some(TypeMeta::FileList { items: file_count }), rest)
+        }
+        META_TYPE_THUMB_UNAVAILABLE => (Some(TypeMeta::ThumbNail(None)), rest),
+        META_TYPE_THUMB_PRESENT => {
+            let (fmt, rest) = read_u8(rest)?;
+            if fmt != THUMB_FMT_JPEG {
+                return Err(WalError::Corrupted);
+            }
+            let (width, rest) = read_u16(rest)?;
+            let (height, rest) = read_u16(rest)?;
+            let (has_alpha, rest) = read_bool(rest)?;
+            let (src_width, rest) = read_u32(rest)?;
+            let (src_height, rest) = read_u32(rest)?;
+            let (orientation, rest) = read_u8(rest)?;
+            let (jpeg_len, rest) = read_u32(rest)?;
+
+            if jpeg_len > MAX_THUMB_BYTES {
+                return Err(WalError::Corrupted);
+            }
+
+            let (jpeg, rest) = rest
+                .split_at_checked(jpeg_len as usize)
+                .ok_or(WalError::Corrupted)?;
+
+            (
+                Some(TypeMeta::ThumbNail(Some(Arc::from(ThumbNail {
+                    width,
+                    height,
+                    has_alpha,
+                    src_width,
+                    src_height,
+                    orientation,
+                    jpeg: Box::from(jpeg),
+                })))),
+                rest,
+            )
+        }
+        NO_META => (None, rest),
+        _ => return Err(WalError::Corrupted),
+    };
+
+    Ok((meta, rest))
+}
+
+/// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes
 fn encode_stored_type_data(
     t: &TypeData,
     offset: &mut usize,
@@ -344,19 +448,55 @@ fn encode_stored_type_data(
         encode_with_size_check(offset, buff, &head_bytes)?;
     }
 
-    match &t.meta {
-        Some(meta) => match meta {
-            TypeMeta::FileList { items } => {
-                encode_with_size_check(offset, buff, &1u8.to_le_bytes())?;
-                encode_with_size_check(offset, buff, &items.to_le_bytes())?;
-            }
-        },
-        None => encode_with_size_check(offset, buff, &0u8.to_le_bytes())?,
-    };
+    encode_type_meta(&t.meta.as_ref(), offset, buff)?;
 
     let len = *offset - original;
 
     Ok(len)
+}
+
+/// encoded as type meta byte, type metadata
+pub fn encode_type_meta(
+    meta: &Option<&TypeMeta>,
+    offset: &mut usize,
+    buff: &mut [u8],
+) -> Result<(), WalError> {
+    match meta {
+        Some(meta) => match meta {
+            TypeMeta::FileList { items } => {
+                encode_with_size_check(offset, buff, &META_TYPE_FILELIST.to_le_bytes())?;
+                encode_with_size_check(offset, buff, &items.to_le_bytes())?;
+            }
+            TypeMeta::ThumbNail(maybe_thumb) => match maybe_thumb {
+                Some(thumb) => {
+                    let len = thumb.jpeg.len() as u32;
+                    if len > MAX_THUMB_BYTES {
+                        return Err(WalError::Corrupted);
+                    }
+                    encode_with_size_check(offset, buff, &META_TYPE_THUMB_PRESENT.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &THUMB_FMT_JPEG.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &thumb.width.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &thumb.height.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &[thumb.has_alpha as u8])?;
+                    encode_with_size_check(offset, buff, &thumb.src_width.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &thumb.src_height.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &thumb.orientation.to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &(thumb.jpeg.len() as u32).to_le_bytes())?;
+                    encode_with_size_check(offset, buff, &thumb.jpeg)?;
+                }
+                None => {
+                    encode_with_size_check(
+                        offset,
+                        buff,
+                        &META_TYPE_THUMB_UNAVAILABLE.to_le_bytes(),
+                    )?;
+                }
+            },
+        },
+        None => encode_with_size_check(offset, buff, &NO_META.to_le_bytes())?,
+    };
+
+    Ok(())
 }
 
 pub fn encode_without_size_check(offset: &mut usize, buff: &mut [u8], src: &[u8]) {

@@ -24,7 +24,7 @@ pub struct Entry {
     pub pending_types: Vec<Option<TypeData>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeData {
     pub mime: Mime<Cow<'static, str>>,
     pub size: u64,
@@ -34,10 +34,23 @@ pub struct TypeData {
 }
 
 #[derive(Debug)]
-pub enum TypeMeta {
-    FileList { items: u32 },
+pub struct ThumbNail {
+    pub width: u16,
+    pub height: u16,
+    pub has_alpha: bool,
+    pub src_width: u32,
+    pub src_height: u32,
+    pub orientation: u8,
+    pub jpeg: Box<[u8]>,
 }
 
+#[derive(Debug, Clone)]
+pub enum TypeMeta {
+    FileList { items: u32 },
+    ThumbNail(Option<Arc<ThumbNail>>),
+}
+
+#[derive(Clone)]
 pub enum Data {
     Inline(Arc<[u8]>),
     File(PayloadFile), // payloads/<id>.<n>; head: first 5 KiB, text and file lists only
@@ -151,6 +164,21 @@ impl Entry {
         }
 
         hasher.digest128()
+    }
+
+    pub fn clone_with_meta_as_committed(&self, type_index: usize, meta: TypeMeta) -> Option<Entry> {
+        let mut new_types = self.types.clone();
+        let t = new_types.get_mut(type_index)?;
+        t.meta = Some(meta);
+
+        Some(Entry {
+            committed: true,
+            id: self.id,
+            key: self.key,
+            payloads_dir: self.payloads_dir.clone(),
+            pending_types: self.pending_types.clone(),
+            types: new_types,
+        })
     }
 }
 

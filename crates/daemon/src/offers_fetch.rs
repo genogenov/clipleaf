@@ -262,10 +262,10 @@ mod tests {
         let (tx, rx): (Sender<IndexMsg>, Receiver<IndexMsg>) = mpsc::channel();
         let entry = EntryBuilder::new(ID, Arc::from(dir.0.as_path()));
         let outcome = fetch((readers, mimes(names)), entry, cancel, idle, tx, ID, 0);
-        let sent = rx
-            .try_recv()
-            .ok()
-            .map(|IndexMsg::Insert { entry, .. }| entry);
+        let sent = rx.try_recv().ok().and_then(|m| match m {
+            IndexMsg::Insert { entry, .. } => Some(entry),
+            _ => None,
+        });
         (outcome, sent)
     }
 

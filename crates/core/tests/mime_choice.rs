@@ -48,8 +48,10 @@ fn text_falls_back_to_html_then_other_text_then_utf16() {
 }
 
 #[test]
-fn any_image_is_fetched_when_there_is_no_png() {
-    assert_eq!(fetch(&["image/webp", "image/jpeg"]), ["image/webp"]);
+fn jpeg_is_fetched_when_there_is_no_png_and_else_the_first_image_offered() {
+    // PNG and JPEG are the formats that get thumbnails, so JPEG beats an earlier WebP.
+    assert_eq!(fetch(&["image/webp", "image/jpeg"]), ["image/jpeg"]);
+    assert_eq!(fetch(&["image/webp", "image/gif"]), ["image/webp"]);
 }
 
 #[test]

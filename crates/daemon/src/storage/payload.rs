@@ -13,6 +13,7 @@ use xxhash_rust::xxh3::Xxh3;
 
 use crate::storage::{Data, EntryBuilder, MAX_INLINE_TYPE_BYTES, TypeData, TypeMeta};
 
+#[derive(Clone)]
 pub struct PayloadFile {
     pub(super) head: Option<Arc<[u8]>>,
     pub(super) seqnum: usize,

@@ -23,7 +23,8 @@ use crate::{
         wal::{
             encoder::{
                 HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreOp, decode_header,
-                decode_record, encode_append, encode_delete, encode_header, encode_touch,
+                decode_record, encode_append, encode_delete, encode_header, encode_thumb,
+                encode_touch,
             },
             error::WalError,
         },
@@ -47,6 +48,7 @@ pub enum LogMsg {
     Append(Item),
     Delete(Item),
     Touch { id: u64, seq: u64, time_ms: u64 },
+    Thumb { item: Item, type_index: u32 },
 }
 
 pub struct Restored {
@@ -303,6 +305,24 @@ impl WriteAheadLog {
                         e.time_ms = max(e.time_ms, time_ms);
                     });
                 }
+                RestoreOp::Thumb {
+                    id,
+                    type_index,
+                    meta,
+                } => {
+                    let Some(item) = by_id.get_mut(&id) else {
+                        log_warn!("Could not find entry with ID {id} for Thumb record");
+                        continue;
+                    };
+                    let Some(t) = item.types.get_mut(type_index as usize) else {
+                        log_warn!(
+                            "Could not find type  with id {type_index} in entry with ID {id} for Thumb record"
+                        );
+                        continue;
+                    };
+                    t.meta = Some(meta);
+                    item.size_on_disk += entry.size_on_disk;
+                }
             }
         }
         self.last_good_len += offset as u64;
@@ -547,6 +567,7 @@ impl WriteAheadLog {
             LogMsg::Append(record) => self.append(record, write_buf),
             LogMsg::Delete(record) => self.delete(record, write_buf),
             LogMsg::Touch { id, seq, time_ms } => self.touch(*id, *seq, *time_ms, write_buf),
+            LogMsg::Thumb { item, type_index } => self.thumb(item, *type_index, write_buf),
         }
     }
 
@@ -620,6 +641,49 @@ impl WriteAheadLog {
         self.write_to_log(len, buf)?;
         self.next_min_seq = max(self.next_min_seq, seq.max(id).saturating_add(1));
         log_debug!("Processed WAL touch - written {} bytes", len);
+        Ok(())
+    }
+
+    fn thumb(
+        &mut self,
+        item: &Item,
+        type_index: u32,
+        write_buf: &mut [u8],
+    ) -> Result<(), io::Error> {
+        if !self.live_records.contains_key(&item.entry.id) {
+            log_debug!("Thumb for entry {} not in the log, skipped", item.entry.id);
+            return Ok(());
+        }
+        let Some(t) = item.entry.types.get(type_index as usize) else {
+            log_debug!(
+                "Thumb for entry {} and type index {} not in the log, skipped",
+                item.entry.id,
+                type_index
+            );
+            return Ok(());
+        };
+
+        let Some(ref meta) = t.meta else {
+            log_debug!(
+                "Meta for entry {} and type index {} not set, skipped thumb record",
+                item.entry.id,
+                type_index
+            );
+            return Ok(());
+        };
+
+        let len = encode_thumb(item.entry.id, type_index, meta, self.header.salt, write_buf)
+            .map_err(io::Error::other)?;
+
+        self.write_to_log(len, write_buf)?;
+        let Some(log_item) = self.live_records.get_mut(&item.entry.id) else {
+            log_debug!("Thumb for entry {} not in the log, skipped", item.entry.id);
+            return Ok(());
+        };
+        log_item.item = item.clone();
+        log_item.size_on_disk += len as u32;
+        self.live_size += len as u64;
+        log_debug!("Processed WAL thumb - written {} bytes", len);
         Ok(())
     }
 

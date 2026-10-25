@@ -1,4 +1,4 @@
-use std::os::fd::RawFd;
+use std::{ffi::c_long, os::fd::RawFd};
 
 unsafe extern "C" {
     /// Forks the current process, returning -1 on error, 0 in the child, and the child's PID in the parent. Link to doc: https://man7.org/linux/man-pages/man2/fork.2.html
@@ -37,6 +37,12 @@ unsafe extern "C" {
 
     /// Creates a file descriptor for event notification. Link to doc: https://man7.org/linux/man-pages/man2/eventfd.2.html
     pub fn eventfd(initval: u32, flags: i32) -> i32;
+
+    /// Sets the priority of a process, process group, or thread. Link to doc: https://man7.org/linux/man-pages/man2/setpriority.2.html
+    pub fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+
+    /// Retrieves the time of a specified clock. Link to doc: https://man7.org/linux/man-pages/man2/clock_gettime.2.html
+    pub fn clock_gettime(clockid: i32, tp: *mut timespec) -> i32;
 }
 
 pub const F_GETPIPE_SZ: i32 = 1032;
@@ -146,6 +152,10 @@ pub const POLLNVAL: i16 = 0x20;
 ))]
 pub const SOL_SOCKET: i32 = 0xffff;
 
+pub const PRIO_PROCESS: i32 = 0;
+
+pub const CLOCK_THREAD_CPUTIME_ID: i32 = 3;
+
 #[repr(C)]
 pub struct iovec {
     pub iov_base: *mut u8,
@@ -186,4 +196,10 @@ pub struct pollfd {
     pub fd: i32,
     pub events: i16,
     pub revents: i16,
+}
+
+#[repr(C)]
+pub struct timespec {
+    pub tv_sec: c_long,
+    pub tv_nsec: c_long,
 }
