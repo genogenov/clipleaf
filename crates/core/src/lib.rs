@@ -1,13 +1,11 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
 mod content_kind;
-mod event_fd;
 mod fd_io;
 pub mod ffi;
 mod file_list;
 #[doc(hidden)]
 mod log_writer;
 mod mime;
-mod poll;
 mod unix_fd_stream;
 mod wl;
 
@@ -29,7 +27,6 @@ pub use wl::{
 };
 
 pub use content_kind::{ContentKind, ContentKinds};
-pub use event_fd::EventFd;
 pub use fd_io::{serve_bytes, serve_file};
 pub use file_list::{FileListFormat, FileListScan};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
@@ -37,4 +34,3 @@ pub use mime::{
     Mime, MimeKind, classify_mime, parse_mime, pick_best_mime, pick_fetch_mimes,
     types as mime_types,
 };
-pub use poll::{PollFd, PollResult, poll};

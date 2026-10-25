@@ -1,20 +1,24 @@
 use std::{env, fs, io, os::fd::AsRawFd};
 
-use clipleaf_core::ffi::{SIG_ERR, SIG_IGN, SIGHUP, dup2, fork, setsid, signal};
+use crate::ffi::definitions::{SIG_ERR, SIG_IGN, SIGHUP, dup2, fork, setsid, signal};
 
 pub enum Forked {
     Parent,
     Child,
 }
 
-pub fn fork_process() -> io::Result<Forked> {
-    // The child stays in the terminal's foreground group until setsid; our exit as session leader would SIGHUP it.
+/// Forks, ignoring SIGHUP in both processes so the child survives the parent's exit until `detach`.
+///
+/// # Safety
+/// The process must be single-threaded: after a fork in a multi-threaded process the child may
+/// only call async-signal-safe functions until exec, and the caller keeps running Rust code in it.
+pub unsafe fn fork_process() -> io::Result<Forked> {
     // SAFETY: installs SIG_IGN, no handler code; only changes this process's SIGHUP disposition.
     if unsafe { signal(SIGHUP, SIG_IGN) } == SIG_ERR {
         return Err(io::Error::last_os_error());
     }
 
-    // SAFETY: Forking is safe in our case because the parent process will exit immediately after forking, and there is only a single thread up to this point.
+    // SAFETY: the caller guarantees a single-threaded process (# Safety above).
     let pid = unsafe { fork() };
     if pid < 0 {
         Err(io::Error::last_os_error())

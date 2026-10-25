@@ -9,9 +9,12 @@ use std::{
 };
 
 use clipleaf_core::{
-    EventFd, Mime, PollFd, PollResult, WlSessionManager,
-    ffi::{POLLERR, POLLHUP, POLLIN},
-    log_error, pick_fetch_mimes, poll,
+    Mime, WlSessionManager,
+    ffi::{
+        event_fd::EventFd,
+        poll::{PollEvents, PollFd, PollResult, poll},
+    },
+    log_error, pick_fetch_mimes,
 };
 
 use crate::{
@@ -78,7 +81,7 @@ fn fetch(
 ) -> JobOutcome {
     let mut entry = entry;
     let mut revents = Vec::with_capacity(pipes.0.len() + 1);
-    let cancel_poll = PollFd::new(cancel.as_fd(), POLLIN);
+    let cancel_poll = PollFd::new(cancel.as_fd(), PollEvents::IN);
     let mut fetch_ops = Vec::with_capacity(pipes.0.len());
     for (pipe, mime) in pipes.0.into_iter().zip(pipes.1) {
         let payload = entry.payload(mime);
@@ -93,11 +96,11 @@ fn fetch(
     loop {
         let poll_result = {
             let mut fds = iter::once(cancel_poll)
-                .chain(
-                    fetch_ops
-                        .iter()
-                        .filter_map(|o| o.pipe.as_ref().map(|p| PollFd::new(p.as_fd(), POLLIN))),
-                )
+                .chain(fetch_ops.iter().filter_map(|o| {
+                    o.pipe
+                        .as_ref()
+                        .map(|p| PollFd::new(p.as_fd(), PollEvents::IN))
+                }))
                 .collect::<Vec<_>>();
 
             if fds.len() == 1 {
@@ -135,7 +138,7 @@ fn fetch(
         };
         match poll_result {
             PollResult::Ready(_) => {
-                if revents[0] & POLLIN != 0 {
+                if revents[0].has_any(PollEvents::IN) {
                     return JobOutcome::Cancelled;
                 }
                 for (i, op) in fetch_ops
@@ -143,7 +146,8 @@ fn fetch(
                     .filter(|op| op.pipe.is_some())
                     .enumerate()
                 {
-                    let active = revents[i + 1] & (POLLIN | POLLHUP | POLLERR) != 0;
+                    let active =
+                        revents[i + 1].has_any(PollEvents::IN | PollEvents::HUP | PollEvents::ERR);
                     if active {
                         let reader = op.pipe.as_mut().unwrap();
                         let writer = op.writer.as_mut().unwrap();

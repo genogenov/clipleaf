@@ -1,6 +1,5 @@
 mod args;
 mod payload;
-mod process_util;
 use std::{
     env,
     fs::File,
@@ -10,7 +9,9 @@ use std::{
 };
 
 use clipleaf_core::{
-    WlBufferedStream, WlSessionEvent, WlSessionManager, init_logging, log_debug, log_error,
+    WlBufferedStream, WlSessionEvent, WlSessionManager,
+    ffi::process::{Forked, detach, fork_process},
+    init_logging, log_debug, log_error,
     mime_types::TEXT_MIME_TYPES,
 };
 
@@ -112,13 +113,14 @@ fn run() -> io::Result<()> {
             } if sync_callback_id == callback_id && !detached => {
                 log_debug!("Received SyncDone - detaching from terminal");
                 detached = true;
-                match process_util::fork_process() {
-                    Ok(process_util::Forked::Parent) => {
+                // SAFETY: copy never starts a thread, so this is the only one.
+                match unsafe { fork_process() } {
+                    Ok(Forked::Parent) => {
                         log_debug!("Parent process exiting after fork");
                         return Ok(());
                     }
-                    Ok(process_util::Forked::Child) => {
-                        if let Err(e) = process_util::detach() {
+                    Ok(Forked::Child) => {
+                        if let Err(e) = detach() {
                             log_error!("Failed to detach child process: {}", e);
                         } else {
                             log_debug!("Successfully detached child process from terminal");

@@ -1,11 +1,33 @@
 use std::{
     io::{self, Error, ErrorKind},
     marker::PhantomData,
+    ops::BitOr,
     os::fd::{AsRawFd, BorrowedFd},
     time::{Duration, Instant},
 };
 
-use crate::ffi::{self, pollfd};
+use crate::ffi::definitions::{self, POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT, pollfd};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PollEvents(i16);
+impl PollEvents {
+    pub const EMPTY: Self = Self(0);
+    pub const IN: Self = Self(POLLIN);
+    pub const OUT: Self = Self(POLLOUT);
+    pub const ERR: Self = Self(POLLERR);
+    pub const HUP: Self = Self(POLLHUP);
+    pub const NVAL: Self = Self(POLLNVAL);
+
+    pub const fn has_any(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+}
+impl BitOr for PollEvents {
+    type Output = Self;
+    fn bitor(self, r: Self) -> Self {
+        Self(self.0 | r.0)
+    }
+}
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -14,18 +36,18 @@ pub struct PollFd<'fd> {
     _fd: PhantomData<BorrowedFd<'fd>>,
 }
 impl<'fd> PollFd<'fd> {
-    pub fn new(fd: BorrowedFd<'fd>, events: i16) -> Self {
+    pub fn new(fd: BorrowedFd<'fd>, events: PollEvents) -> Self {
         PollFd {
             raw: pollfd {
                 fd: fd.as_raw_fd(),
-                events,
+                events: events.0,
                 revents: 0,
             },
             _fd: PhantomData,
         }
     }
-    pub fn revents(&self) -> i16 {
-        self.raw.revents
+    pub fn revents(&self) -> PollEvents {
+        PollEvents(self.raw.revents)
     }
 }
 
@@ -54,7 +76,8 @@ pub fn poll(fds: &mut [PollFd<'_>], duration: Option<Duration>) -> io::Result<Po
         // SAFETY: PollFd is repr(transparent) over pollfd, so `fds` is a valid array of fds.len()
         // pollfds; each fd is borrowed (BorrowedFd<'fd>) and stays open for the call; the kernel
         // reads fd/events and writes only revents within the slice.
-        let result = unsafe { ffi::poll(fds_ptr, fds.len() as std::ffi::c_ulong, timeout_ms) };
+        let result =
+            unsafe { definitions::poll(fds_ptr, fds.len() as std::ffi::c_ulong, timeout_ms) };
         if result == 0 {
             return Ok(PollResult::Timeout);
         }

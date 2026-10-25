@@ -9,11 +9,10 @@ use std::{
     ptr,
 };
 
-use crate::ffi::{F_GETFL, O_NONBLOCK};
-use crate::{
-    ffi::{F_GETPIPE_SZ, F_SETFL, F_SETPIPE_SZ, fcntl, splice},
-    log_debug,
+use crate::ffi::definitions::{
+    F_GETFL, F_GETPIPE_SZ, F_SETFL, F_SETPIPE_SZ, O_NONBLOCK, fcntl, splice,
 };
+use crate::log_debug;
 
 pub const IN_FD_BUFFER_LEN: usize = 64;
 

@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clipleaf_core::{PollFd, PollResult, ffi::POLLIN, poll};
+use clipleaf_core::ffi::poll::{PollEvents, PollFd, PollResult, poll};
 use clipleaf_test_common::{
     bins::Guarded,
     raw::{
@@ -170,7 +170,7 @@ impl Daemon {
         };
         let mut child = command.spawn().expect("spawn clipleafd");
         // A daemon that fails at startup never connects: fail with its exit status, don't hang.
-        let mut listener = [PollFd::new(comp.listener_fd(), POLLIN)];
+        let mut listener = [PollFd::new(comp.listener_fd(), PollEvents::IN)];
         if !matches!(poll(&mut listener, Some(WAIT)), Ok(PollResult::Ready(_))) {
             let _ = child.kill();
             panic!("clipleafd never connected: {:?}", child.wait());
@@ -221,7 +221,7 @@ impl Daemon {
     }
 
     pub fn wait_readable(&self, what: &str) {
-        let mut fds = [PollFd::new(self.peer.as_fd(), POLLIN)];
+        let mut fds = [PollFd::new(self.peer.as_fd(), PollEvents::IN)];
         let ready = poll(&mut fds, Some(WAIT)).unwrap();
         assert!(
             matches!(ready, PollResult::Ready(_)),

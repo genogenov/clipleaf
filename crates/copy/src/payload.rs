@@ -139,6 +139,8 @@ mod tests {
     //! What the binary-level tests (`copy/tests/scenarios.rs`) cannot see: a wrong `O_TMPFILE`
     //! value is hidden by the fallback, and the fallback itself only runs where the filesystem
     //! lacks O_TMPFILE. Sizes, offsets, spilling and temp-dir errors are covered through the binary.
+    use clipleaf_core::ffi::O_TMPFILE;
+
     use super::*;
     use std::{
         env,

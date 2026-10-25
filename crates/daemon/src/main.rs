@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+mod image;
 mod index;
 mod jobs;
 mod offers_fetch;
@@ -13,9 +14,9 @@ use std::{
 };
 
 use clipleaf_core::{
-    PollFd, WlBufferedStream, WlDataControlOffer, WlSessionEvent, WlSessionManager,
-    ffi::{POLLIN, POLLNVAL, POLLOUT},
-    init_logging, log_debug, log_error, log_info, poll,
+    WlBufferedStream, WlDataControlOffer, WlSessionEvent, WlSessionManager,
+    ffi::poll::{PollEvents, PollFd, poll},
+    init_logging, log_debug, log_error, log_info,
 };
 
 use crate::{
@@ -78,28 +79,28 @@ fn run() -> io::Result<()> {
 
     loop {
         session.flush()?; // one sendmsg per iteration
-        let events = POLLIN
+        let events = PollEvents::IN
             | if session.has_pending_writes() {
-                POLLOUT
+                PollEvents::OUT
             } else {
-                0
+                PollEvents::EMPTY
             };
         let (wl_events, job_events) = {
             let mut fds = [
                 PollFd::new(session.as_fd(), events),
-                PollFd::new(jobs.as_fd(), POLLIN),
+                PollFd::new(jobs.as_fd(), PollEvents::IN),
             ];
             poll(&mut fds, None)?;
             (fds[0].revents(), fds[1].revents())
         }; // borrow ends before the drain
-        if wl_events & POLLNVAL != 0 {
+        if wl_events.has_any(PollEvents::NVAL) {
             return Err(Error::other("wayland socket not open"));
         } // our bug
 
-        if job_events & POLLNVAL != 0 {
+        if job_events.has_any(PollEvents::NVAL) {
             return Err(Error::other("job bell not open"));
         }
-        if job_events & POLLIN != 0 {
+        if job_events.has_any(PollEvents::IN) {
             jobs.reset_wait_event()?;
             while let Some(msg) = jobs.try_next_done() {
                 match msg.result {

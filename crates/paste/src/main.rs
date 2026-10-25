@@ -7,15 +7,13 @@ use std::{
         ErrorKind::{self, InvalidInput},
         IsTerminal, Write,
     },
-    os::fd::{AsRawFd, OwnedFd},
+    os::fd::{AsFd, OwnedFd},
     process::ExitCode,
 };
 
 use clipleaf_core::{
-    WlBufferedStream, WlSessionEvent, WlSessionManager,
-    ffi::{F_SETPIPE_SZ, fcntl},
-    init_logging, log_debug, log_error,
-    mime_types::TEXT_MIME_TYPES,
+    WlBufferedStream, WlSessionEvent, WlSessionManager, ffi::fd::resize_pipe, init_logging,
+    log_debug, log_error, mime_types::TEXT_MIME_TYPES,
 };
 
 use crate::args::{Command, PasteArgs};
@@ -99,9 +97,8 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
     let (mut reader, writer) = io::pipe()?;
     let fd = OwnedFd::from(writer);
 
-    // SAFETY: fd is an open pipe we own and F_SETPIPE_SZ is a valid fcntl command for setting the pipe size, which takes one arg.
-    // If this fails we are OK to ignore and proceed.
-    unsafe { fcntl(fd.as_raw_fd(), F_SETPIPE_SZ, 1 << 20) };
+    // Best effort: a smaller pipe only costs speed.
+    _ = resize_pipe(fd.as_fd(), 1 << 20);
     let Some(preferred_mime) = mgr.receive_offer(args.primary, args.mime.as_deref(), fd)? else {
         return Err(io::Error::new(
             InvalidInput,

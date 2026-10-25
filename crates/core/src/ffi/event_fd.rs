@@ -4,14 +4,14 @@ use std::{
     os::fd::{AsFd, FromRawFd},
 };
 
-use crate::ffi::{self, EFD_CLOEXEC};
+use crate::ffi::definitions::{EFD_CLOEXEC, eventfd};
 
 pub struct EventFd(File);
 
 impl EventFd {
     pub fn new() -> io::Result<Self> {
         // SAFETY: part of the standard C lib
-        let efd = unsafe { ffi::eventfd(0, EFD_CLOEXEC) };
+        let efd = unsafe { eventfd(0, EFD_CLOEXEC) };
 
         if efd < 0 {
             return Err(Error::last_os_error());

@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     fd_io::{InFdBuffer, OUT_FD_BUFFER_LEN},
-    ffi::{
+    ffi::definitions::{
         CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, MSG_NOSIGNAL, SCM_RIGHTS,
         SOL_SOCKET, cmsg_align, cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
     },

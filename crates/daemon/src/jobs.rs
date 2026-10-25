@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clipleaf_core::{EventFd, log_debug, log_error};
+use clipleaf_core::{ffi::event_fd::EventFd, log_debug, log_error};
 
 pub const MAX_JOBS: usize = 8;
 
@@ -226,7 +226,7 @@ impl AsFd for JobList {
 mod tests {
     use std::io::PipeReader;
 
-    use clipleaf_core::{PollFd, PollResult, ffi::POLLIN, poll};
+    use clipleaf_core::ffi::poll::{PollEvents, PollFd, PollResult, poll};
 
     use super::*;
 
@@ -237,7 +237,7 @@ mod tests {
             if let Some(msg) = jobs.try_next_done() {
                 return msg;
             }
-            let mut fds = [PollFd::new(jobs.as_fd(), POLLIN)];
+            let mut fds = [PollFd::new(jobs.as_fd(), PollEvents::IN)];
             let result = poll(&mut fds, Some(Duration::from_secs(10))).unwrap();
             assert!(matches!(result, PollResult::Ready(1)), "no job finished");
             jobs.reset_wait_event().unwrap();
@@ -247,11 +247,11 @@ mod tests {
     /// Waits until the job is cancelled or `release` is closed.
     fn wait_for_cancel_or(cancel: &EventFd, release: &PipeReader) -> JobOutcome {
         let mut fds = [
-            PollFd::new(cancel.as_fd(), POLLIN),
-            PollFd::new(release.as_fd(), POLLIN),
+            PollFd::new(cancel.as_fd(), PollEvents::IN),
+            PollFd::new(release.as_fd(), PollEvents::IN),
         ];
         poll(&mut fds, None).unwrap();
-        if fds[0].revents() & POLLIN != 0 {
+        if fds[0].revents().has_any(PollEvents::IN) {
             JobOutcome::Cancelled
         } else {
             JobOutcome::Data(JobData::Fetch(Vec::new()))
