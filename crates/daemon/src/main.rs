@@ -14,7 +14,7 @@ use std::{
 };
 
 use clipleaf_core::{
-    WlBufferedStream, WlDataControlOffer, WlSessionEvent, WlSessionManager,
+    WlBufferedStream, WlSessionEvent, WlSessionManager,
     ffi::poll::{PollEvents, PollFd, poll},
     init_logging, log_debug, log_error, log_info,
 };
@@ -136,17 +136,13 @@ fn run() -> io::Result<()> {
 
         // POLLIN, POLLHUP, POLLERR: drain. HUP/ERR end in Err(UnexpectedEof) from the drain.
         let mut changed_offer = false;
-        let mut changed_primary_offer = false;
         while let Some(event) = session.try_next_event()? {
             if let WlSessionEvent::Selection { .. } = event {
                 changed_offer = true;
             } // primary: ignored for now
-            if let WlSessionEvent::PrimarySelection { .. } = event {
-                changed_primary_offer = true;
-            }
+            if let WlSessionEvent::PrimarySelection { .. } = event {}
         }
         if changed_offer {
-            log_selection(session.get_offer());
             if let Err(e) = start_fetch(
                 &mut session,
                 &mut jobs,
@@ -159,17 +155,5 @@ fn run() -> io::Result<()> {
             }
             seq_counter = seq_counter.wrapping_add(1);
         }
-        if changed_primary_offer {
-            log_selection(session.get_primary_offer());
-        }
-    }
-}
-
-fn log_selection(offer: Option<&WlDataControlOffer>) {
-    match offer {
-        Some(o) => {
-            log_info!("Offered mime types: {}", o.offered_mime_types().join(", "));
-        }
-        None => log_info!("selection cleared"),
     }
 }
