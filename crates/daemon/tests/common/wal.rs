@@ -7,7 +7,11 @@
 //!
 //! An Insert body: id u64 | seq u64 | time_ms u64 | pinned u8 | type count u32, then per type:
 //! mime len u32 | mime | size u64 | hash u128 | in_file u8 | file seq u32 | head len u32 | head |
-//! meta tag u8 (0 none, 1 file list: then its item count u32).
+//! meta tag u8 (0 none, 1 file list: then its item count u32; 2 thumbnail: format u8 (1 JPEG) |
+//! width u16 | height u16 | has_alpha u8 | src_width u32 | src_height u32 | orientation u8 |
+//! jpeg len u32 | jpeg; 3 no thumbnail).
+//!
+//! A Thumb body: id u64 | type index u32 | meta (as above, tag 2 or 3).
 
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
@@ -16,6 +20,7 @@ pub const HEADER_LEN: usize = 40;
 pub const INSERT: u8 = 1;
 pub const DELETE: u8 = 2;
 pub const TOUCH: u8 = 3;
+pub const THUMB: u8 = 4;
 
 pub fn salt_of(wal: &[u8]) -> u64 {
     u64::from_le_bytes(wal[16..24].try_into().unwrap())
@@ -49,8 +54,19 @@ pub fn record(salt: u64, kind: u8, body: &[u8]) -> Vec<u8> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Record {
     Insert(Insert),
-    Delete { id: u64 },
-    Touch { id: u64, seq: u64 },
+    Delete {
+        id: u64,
+    },
+    Touch {
+        id: u64,
+        seq: u64,
+    },
+    /// A thumbnail for one type of an entry, or the marker that it can't get one (`None`).
+    Thumb {
+        id: u64,
+        type_index: u32,
+        thumb: Option<Thumb>,
+    },
     Unknown(u8),
 }
 
@@ -73,6 +89,51 @@ pub struct Stored {
     /// The item count of a file list (`text/uri-list`, KDE's, GNOME's), counted over all its
     /// bytes, not just the head.
     pub items: Option<u32>,
+    /// An image type's thumbnail state: `None` not made yet, `Some(None)` it can't get one.
+    pub thumb: Option<Option<Thumb>>,
+}
+
+/// A stored thumbnail: a JPEG of at most 256×256, the source size as displayed, and the EXIF
+/// orientation the source had (already applied to the JPEG).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Thumb {
+    pub width: u16,
+    pub height: u16,
+    pub has_alpha: bool,
+    pub src_width: u32,
+    pub src_height: u32,
+    pub orientation: u8,
+    pub jpeg: Vec<u8>,
+}
+
+/// Tag 2 or 3 and what follows it: `Some(thumb)` for tag 2, `None` for 3 (`Err` for any other).
+fn thumb_meta(tag: u8, body: &mut Reader<'_>) -> Option<Result<Option<Thumb>, ()>> {
+    Some(match tag {
+        2 => {
+            if body.take(1)?[0] != 1 {
+                return None; // only JPEG
+            }
+            let width = u16::from_le_bytes(body.take(2)?.try_into().unwrap());
+            let height = u16::from_le_bytes(body.take(2)?.try_into().unwrap());
+            let has_alpha = body.take(1)?[0] != 0;
+            let src_width = body.u32()?;
+            let src_height = body.u32()?;
+            let orientation = body.take(1)?[0];
+            let len = body.u32()? as usize;
+            let jpeg = body.take(len)?.to_vec();
+            Ok(Some(Thumb {
+                width,
+                height,
+                has_alpha,
+                src_width,
+                src_height,
+                orientation,
+                jpeg,
+            }))
+        }
+        3 => Ok(None),
+        _ => Err(()),
+    })
 }
 
 impl Insert {
@@ -97,6 +158,21 @@ pub fn records(wal: &[u8]) -> Vec<Record> {
     while let Some((record, next)) = next_record(rest, salt) {
         out.push(record);
         rest = next;
+    }
+    out
+}
+
+/// The end offset in the file of each record `records` returns.
+pub fn record_ends(wal: &[u8]) -> Vec<usize> {
+    let mut out = Vec::new();
+    if wal.len() < HEADER_LEN || &wal[..14] != IDENTIFIER {
+        return out;
+    }
+    let salt = salt_of(wal);
+    let mut rest = &wal[HEADER_LEN..];
+    while let Some((_, next)) = next_record(rest, salt) {
+        rest = next;
+        out.push(wal.len() - rest.len());
     }
     out
 }
@@ -128,17 +204,19 @@ fn next_record(buf: &[u8], salt: u64) -> Option<(Record, &[u8])> {
                 let _file_seq = body.u32()?;
                 let head_len = body.u32()? as usize;
                 let head = body.take(head_len)?.to_vec();
-                let items = match body.take(1)?[0] {
-                    0 => None,
-                    1 => Some(body.u32()?),
-                    _ => return None,
-                };
+                let (mut items, mut thumb) = (None, None);
+                match body.take(1)?[0] {
+                    0 => {}
+                    1 => items = Some(body.u32()?),
+                    tag => thumb = Some(thumb_meta(tag, &mut body)?.ok()?),
+                }
                 types.push(Stored {
                     mime,
                     size,
                     in_file,
                     head,
                     items,
+                    thumb,
                 });
             }
             if !body.0.is_empty() {
@@ -151,6 +229,20 @@ fn next_record(buf: &[u8], salt: u64) -> Option<(Record, &[u8])> {
             id: body.u64()?,
             seq: body.u64()?,
         },
+        THUMB => {
+            let id = body.u64()?;
+            let type_index = body.u32()?;
+            let tag = body.take(1)?[0];
+            let thumb = thumb_meta(tag, &mut body)?.ok()?;
+            if !body.0.is_empty() {
+                return None;
+            }
+            Record::Thumb {
+                id,
+                type_index,
+                thumb,
+            }
+        }
         kind => Record::Unknown(kind),
     };
     Some((record, &buf[len + 8..]))

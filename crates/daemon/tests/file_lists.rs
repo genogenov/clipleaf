@@ -136,7 +136,7 @@ fn a_record_with_an_unknown_meta_tag_is_dropped_with_everything_after_it() {
     let second = &wal[after_first..];
     let len = u32::from_le_bytes(second[..4].try_into().unwrap()) as usize;
     let mut body = second[5..len].to_vec();
-    *body.last_mut().unwrap() = 2; // the only type's meta tag
+    *body.last_mut().unwrap() = 9; // the only type's meta tag (0–3 are known)
     let mut damaged = wal[..after_first].to_vec();
     damaged.extend(record(salt_of(&wal), INSERT, &body));
     std::fs::write(state.wal(), damaged).unwrap();

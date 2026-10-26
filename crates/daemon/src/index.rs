@@ -2,6 +2,7 @@ use std::{
     cmp::max,
     collections::HashMap,
     io, mem,
+    path::Path,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         mpsc::{self, Receiver, Sender},
@@ -9,11 +10,14 @@ use std::{
     thread,
 };
 
-use clipleaf_core::{log_debug, log_error, log_warn};
+use clipleaf_core::{ContentKind, log_debug, log_error, log_warn};
 
-use crate::storage::{
-    Entry, TypeMeta,
-    wal::log::{LogMsg, Restored},
+use crate::{
+    image::{ImageJob, ImageQueue, ImageSource},
+    storage::{
+        Data, Entry, TypeMeta,
+        wal::log::{LogMsg, Restored},
+    },
 };
 
 pub enum IndexMsg {
@@ -22,8 +26,6 @@ pub enum IndexMsg {
         time_ms: u64,
         entry: Entry,
     },
-
-    #[allow(dead_code)]
     SetThumb {
         id: u64,
         type_index: u32,
@@ -46,12 +48,12 @@ pub struct Snapshot {
 pub struct SnapshotHandle(Arc<Mutex<Arc<Snapshot>>>);
 
 impl SnapshotHandle {
-    // pub fn get_clone(&self) -> Arc<Snapshot> {
-    //     self.0
-    //         .lock()
-    //         .unwrap_or_else(PoisonError::into_inner)
-    //         .clone()
-    // }
+    pub fn get_clone(&self) -> Arc<Snapshot> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 
     fn get(&self) -> MutexGuard<'_, Arc<Snapshot>> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
@@ -65,10 +67,19 @@ struct Index {
     pinned_count: usize,
     shared: SnapshotHandle,
     log_sender: Sender<LogMsg>,
+    img_queue: Arc<ImageQueue>,
+    payload_dir: Arc<Path>,
 }
 
 impl Index {
     fn run(mut self, rx: Receiver<IndexMsg>) {
+        // queue jobs for all items that currently do not have thumbs before we start indexing
+        for item in self.current.items.iter().rev() {
+            for job in self.image_jobs(&item.entry) {
+                self.img_queue.push(job);
+            }
+        }
+
         while let Ok(msg) = rx.recv() {
             match msg {
                 IndexMsg::Insert {
@@ -125,6 +136,7 @@ impl Index {
             entry: Arc::new(entry),
         };
         log_debug!("Added entry {:?}.", item);
+        let jobs: Vec<_> = self.image_jobs(&item.entry).collect();
         items.insert(
             // insert just behind the next biggest seq num.
             items.partition_point(|x| x.seq > seq),
@@ -153,6 +165,36 @@ impl Index {
 
         log_debug!("Total entries {:?}.", items.len());
         self.publish(items);
+
+        for imgjob in jobs {
+            log_debug!(
+                "Pushing Img processing job entry ID {} and type idx {}",
+                imgjob.id,
+                imgjob.type_index
+            );
+            self.img_queue.push(imgjob);
+        }
+    }
+
+    fn image_jobs<'a>(&'a self, entry: &'a Entry) -> impl Iterator<Item = ImageJob> + 'a {
+        entry
+            .types
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                t.meta.is_none()
+                    && ContentKind::from_mime(&t.mime).is_some_and(|k| k == ContentKind::Image)
+            })
+            .map(|(i, t_img)| ImageJob {
+                id: entry.id,
+                type_index: i as u32,
+                source: match t_img.data {
+                    Data::Inline(ref items) => ImageSource::Inline(items.clone()),
+                    Data::File(ref payload_file) => {
+                        ImageSource::File(payload_file.payload_path(&self.payload_dir))
+                    }
+                },
+            })
     }
 
     fn set_thumb(&mut self, id: u64, type_index: u32, meta: TypeMeta) {
@@ -208,6 +250,8 @@ pub fn spawn_index(
     history_count_limit: usize,
     log_tx: Sender<LogMsg>,
     restored: Restored,
+    img_queue: Arc<ImageQueue>,
+    payload_dir: Arc<Path>,
 ) -> io::Result<(Sender<IndexMsg>, SnapshotHandle)> {
     let (tx, rx) = mpsc::channel();
 
@@ -223,7 +267,10 @@ pub fn spawn_index(
         shared: handle.clone(),
         pinned_count,
         log_sender: log_tx,
+        img_queue,
+        payload_dir,
     };
+
     thread::Builder::new()
         .name("index".into())
         .spawn(move || index.run(rx))?;

@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 clipleaf-core = { path = "../core" }
 xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+jpeg-encoder = "0.7.1"
 
 [dev-dependencies]
 clipleaf-test-common = { path = "../tests-common" }

@@ -33,7 +33,6 @@ pub struct TypeData {
     pub meta: Option<TypeMeta>,
 }
 
-#[derive(Debug)]
 pub struct ThumbNail {
     pub width: u16,
     pub height: u16,
@@ -44,7 +43,21 @@ pub struct ThumbNail {
     pub jpeg: Box<[u8]>,
 }
 
-#[derive(Debug, Clone)]
+impl Debug for ThumbNail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThumbNail")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("has_alpha", &self.has_alpha)
+            .field("src_width", &self.src_width)
+            .field("src_height", &self.src_height)
+            .field("orientation", &self.orientation)
+            .field("jpeg len", &self.jpeg.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum TypeMeta {
     FileList { items: u32 },
     ThumbNail(Option<Arc<ThumbNail>>),

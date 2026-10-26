@@ -9,6 +9,10 @@
 //! The history itself isn't readable until step 4's IPC, so a test asks it by copying: a copy
 //! of an entry that is in the history is a duplicate (a Touch record), anything else is a new
 //! entry (an Insert record). Set `CLIPLEAF_TEST_LOG=debug` to see the daemon's stderr.
+//!
+//! Every image type gets a Thumb record some time after its Insert, from one of two workers in
+//! any order, so `next_record` sets Thumb records aside (`thumbs`) and `wait_thumb` waits for
+//! the one of a given entry.
 #![allow(dead_code)] // each test file uses a different part
 
 pub mod wal;
@@ -135,6 +139,8 @@ pub struct Daemon {
     wal: PathBuf,
     /// WAL records already returned (or there at startup).
     seen: usize,
+    /// Thumb records `next_record` stepped over, in log order: `(id, type index, thumb)`.
+    thumbs: Vec<(u64, u32, Option<wal::Thumb>)>,
     /// Offers the daemon has destroyed so far.
     destroyed: Vec<u32>,
     fds: VecDeque<OwnedFd>,
@@ -187,6 +193,7 @@ impl Daemon {
             peer,
             wal: state.wal(),
             seen: 0,
+            thumbs: Vec::new(),
             destroyed: Vec::new(),
             fds: VecDeque::new(),
             child: Some(Guarded::new(child)),
@@ -206,6 +213,33 @@ impl Daemon {
         // The history is restored (and the log cut or reset) before the daemon connects.
         daemon.seen = wal::records(&fs::read(&daemon.wal).unwrap()).len();
         daemon
+    }
+
+    pub fn pid(&mut self) -> u32 {
+        self.child.as_mut().unwrap().child().id()
+    }
+
+    /// Thumb records seen so far, in log order: `(id, type index, thumb)`.
+    pub fn thumbs(&self) -> &[(u64, u32, Option<wal::Thumb>)] {
+        &self.thumbs
+    }
+
+    /// Waits for the Thumb record of entry `id` (its only image type): the thumbnail, or `None`
+    /// when the image can't get one.
+    pub fn wait_thumb(&mut self, id: u64) -> Option<wal::Thumb> {
+        loop {
+            if let Some((_, _, thumb)) = self.thumbs.iter().find(|(i, _, _)| *i == id) {
+                return thumb.clone();
+            }
+            match self.next_any_record() {
+                wal::Record::Thumb {
+                    id,
+                    type_index,
+                    thumb,
+                } => self.thumbs.push((id, type_index, thumb)),
+                other => panic!("expected only Thumb records while waiting for one, got {other:?}"),
+            }
+        }
     }
 
     /// Kills the daemon (no clean shutdown: what it wrote is what a crash leaves) and reaps it.
@@ -373,8 +407,22 @@ impl Daemon {
         }
     }
 
-    /// Waits for the next record the daemon writes to `wal.log`.
+    /// Waits for the next record the daemon writes to `wal.log` that isn't a Thumb record.
     pub fn next_record(&mut self) -> wal::Record {
+        loop {
+            match self.next_any_record() {
+                wal::Record::Thumb {
+                    id,
+                    type_index,
+                    thumb,
+                } => self.thumbs.push((id, type_index, thumb)),
+                record => return record,
+            }
+        }
+    }
+
+    /// Waits for the next record the daemon writes to `wal.log`, of any type.
+    fn next_any_record(&mut self) -> wal::Record {
         let start = Instant::now();
         loop {
             let records = wal::records(&fs::read(&self.wal).unwrap());

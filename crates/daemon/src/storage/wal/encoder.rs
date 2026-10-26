@@ -206,7 +206,7 @@ pub fn encode_thumb(
 pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
     let (len, _rest) = read_u32(buff)?;
 
-    log_debug!("Checking len field.. {}, {}", len, buff.len());
+    // log_debug!("Checking len field.. {}, {}", len, buff.len());
     // len needs to be at least size(u32) + size(u8) for len + type
     let total_len = len.saturating_add(8); // len of record + checksum; 
     if len < 5 || total_len > MAX_RECORD_LEN || buff.len() < total_len as usize {

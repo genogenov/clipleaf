@@ -122,7 +122,7 @@ impl PayloadFile {
     pub fn restored(id: u64, seqnum: usize, maybe_head: &[u8]) -> Self {
         let head = match maybe_head.len() {
             0 => None,
-            _ => Some(Arc::from(maybe_head.to_vec())),
+            _ => Some(Arc::from(maybe_head)),
         };
 
         Self { head, seqnum, id }

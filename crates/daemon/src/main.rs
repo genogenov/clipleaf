@@ -9,7 +9,7 @@ use std::{
     io::{self, Error},
     os::fd::AsFd,
     process::ExitCode,
-    sync::mpsc::Sender,
+    sync::{Arc, mpsc::Sender},
     time::Duration,
 };
 
@@ -20,6 +20,7 @@ use clipleaf_core::{
 };
 
 use crate::{
+    image::ImageQueue,
     jobs::{JobData, JobList, JobOutcome, JobResult},
     offers_fetch::start_fetch,
     storage::{
@@ -68,8 +69,20 @@ fn run() -> io::Result<()> {
             ));
         }
     };
+
+    let img_queue = Arc::new(ImageQueue::new());
+
     log_debug!("Spawning index..");
-    let (index_tx, _snapshot) = index::spawn_index(MAX_HISTORY_LIMIT, log_tx, restored)?;
+    let (index_tx, snapshot) = index::spawn_index(
+        MAX_HISTORY_LIMIT,
+        log_tx,
+        restored,
+        img_queue.clone(),
+        store.payloads_dir(),
+    )?;
+
+    log_debug!("Spawnig Img processing threads..");
+    image::spawn_workers(img_queue, index_tx.clone(), snapshot)?;
 
     let mut stream = WlBufferedStream::connect_from_env()?;
     stream.set_nonblocking_writes();
