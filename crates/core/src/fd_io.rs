@@ -1,4 +1,6 @@
 use std::io::{self, Write};
+use std::os::fd::{AsFd, BorrowedFd};
+use std::time::Duration;
 use std::{
     fs::File,
     io::ErrorKind,
@@ -9,9 +11,9 @@ use std::{
     ptr,
 };
 
-use crate::ffi::definitions::{
-    F_GETFL, F_GETPIPE_SZ, F_SETFL, F_SETPIPE_SZ, O_NONBLOCK, fcntl, splice,
-};
+use crate::ffi::definitions::{F_GETPIPE_SZ, F_SETPIPE_SZ, fcntl, splice};
+use crate::ffi::fd::set_nonblocking;
+use crate::ffi::poll::{PollEvents, PollFd, PollResult, poll};
 use crate::log_debug;
 
 pub const IN_FD_BUFFER_LEN: usize = 64;
@@ -104,19 +106,28 @@ const PIPE_DATA_GROW_THRESHOLD: u64 = 4096;
 const PIPE_GROW_SIZE: i32 = 1 << 20;
 
 pub fn serve_bytes(out: OwnedFd, payload: &[u8]) -> std::io::Result<()> {
-    let (_, mut out) = prepare_out_fd(out, payload.len() as u64)?;
+    let (_, mut out) = prepare_out_fd(out, payload.len() as u64, false)?;
 
     out.write_all(payload)
+}
+
+pub fn serve_bytes_nonblocking(
+    out: OwnedFd,
+    payload: &[u8],
+    stall_timeout: Duration,
+) -> std::io::Result<()> {
+    let (_, mut out) = prepare_out_fd(out, payload.len() as u64, true)?;
+    write_all_nonblocking(&mut out, payload, stall_timeout)
 }
 
 /// Serves the payload to the given output file descriptor. If the output is a pipe and the payload is large, it may use a two-stage splice for better performance.
 /// The payload must not change while it is served - splice hands the paster references to its cached pages.
 pub fn serve_file(out: OwnedFd, payload: &File, payload_len: u64) -> std::io::Result<()> {
-    let (is_pipe, mut out) = prepare_out_fd(out, payload_len)?;
+    let (is_pipe, mut out) = prepare_out_fd(out, payload_len, false)?;
 
     if is_pipe {
         log_debug!("Using two-stage splice for FIFO(pipe) output");
-        return write_all_two_stage_splice(&out, payload, payload_len);
+        return write_all_two_stage_splice(&out, payload, payload_len, None);
     }
 
     // TODO: Consider vec pool.
@@ -132,19 +143,86 @@ pub fn serve_file(out: OwnedFd, payload: &File, payload_len: u64) -> std::io::Re
     Ok(())
 }
 
-fn prepare_out_fd(out: OwnedFd, payload_len: u64) -> std::io::Result<(bool, File)> {
-    // SAFETY: F_GETFL takes no argument, F_SETFL one int.
-    let flags = unsafe { fcntl(out.as_raw_fd(), F_GETFL) };
-    if flags != -1 && flags & O_NONBLOCK != 0 {
-        // SAFETY: flags come from F_GETFL; only O_NONBLOCK is removed.
-        // We do this to clear O_NONBLOCK if set to ensure blocking writes.
-        let fcntl_result = unsafe { fcntl(out.as_raw_fd(), F_SETFL, flags & !O_NONBLOCK) };
-        if fcntl_result == -1 {
-            log_debug!(
-                "Failed to clear O_NONBLOCK on output FD: {}",
-                io::Error::last_os_error()
-            );
+pub fn serve_file_nonblocking(
+    out: OwnedFd,
+    payload: &File,
+    payload_len: u64,
+    stall_timeout: Duration,
+) -> std::io::Result<()> {
+    let (is_pipe, mut out) = prepare_out_fd(out, payload_len, true)?;
+
+    if is_pipe {
+        log_debug!("Using two-stage splice for FIFO(pipe) output");
+        return write_all_two_stage_splice(&out, payload, payload_len, Some(stall_timeout));
+    }
+
+    // TODO: Consider vec pool.
+    const BUFFER_SIZE: usize = 256 * 1024;
+    let mut buffer = vec![0u8; BUFFER_SIZE];
+    let mut total_written = 0;
+    while total_written < payload_len {
+        let remaining = (payload_len - total_written).min(BUFFER_SIZE as u64) as usize;
+        payload.read_exact_at(&mut buffer[..remaining], total_written)?;
+        total_written += remaining as u64;
+        write_all_nonblocking(&mut out, &buffer[..remaining], stall_timeout)?;
+    }
+    Ok(())
+}
+
+fn write_all_nonblocking(
+    out: &mut File,
+    payload: &[u8],
+    stall_timeout: Duration,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < payload.len() {
+        match out.write(&payload[written..]) {
+            Ok(w) => {
+                if w == 0 {
+                    return Err(io::Error::new(
+                        ErrorKind::WriteZero,
+                        "pipe accepted no data",
+                    ));
+                }
+                written += w;
+            }
+            Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => {
+                    wait_writable(out.as_fd(), stall_timeout)?;
+                }
+                ErrorKind::Interrupted => {
+                    continue;
+                }
+                _ => return Err(e),
+            },
         }
+    }
+    Ok(())
+}
+
+fn wait_writable(out: BorrowedFd, stall: Duration) -> io::Result<()> {
+    let mut fds = [PollFd::new(out, PollEvents::OUT)];
+    match poll(&mut fds, Some(stall))? {
+        PollResult::Timeout => Err(io::Error::new(
+            ErrorKind::TimedOut,
+            "paster stopped reading",
+        )),
+        PollResult::Ready(_) => Ok(()),
+    }
+}
+
+fn prepare_out_fd(
+    out: OwnedFd,
+    payload_len: u64,
+    nonblocking: bool,
+) -> std::io::Result<(bool, File)> {
+    // We do this to set O_NONBLOCK to ensure (non)blocking writes.
+    if let Err(e) = set_nonblocking(out.as_fd(), nonblocking) {
+        // Treat only setting the "nonblocking" as hard err.
+        if nonblocking {
+            return Err(e);
+        }
+        log_debug!("Failed to clear O_NONBLOCK on output FD: {e}");
     }
 
     let out = File::from(out);
@@ -163,7 +241,12 @@ fn prepare_out_fd(out: OwnedFd, payload_len: u64) -> std::io::Result<(bool, File
 // Use a 2 stage splice to do zero(user space) copy from the payload file to the output pipe.
 // Two stages overlap the page-cache lookup of our file with the paster draining its pipe: ~20% faster on tmpfs for 100 MiB.
 // A direct splice keeps the paster's pipe locked during that lookup, so we and the paster take turns (~100 waits per 100 MiB assuming 1MB pipe).
-fn write_all_two_stage_splice(out: &File, payload: &File, len: u64) -> io::Result<()> {
+fn write_all_two_stage_splice(
+    out: &File,
+    payload: &File,
+    len: u64,
+    nonblock_stall_timeout: Option<Duration>,
+) -> io::Result<()> {
     let payload_fd = payload.as_raw_fd();
     let mut temp_in_offset = 0i64;
     let out_fd = out.as_raw_fd();
@@ -223,6 +306,10 @@ fn write_all_two_stage_splice(out: &File, payload: &File, len: u64) -> io::Resul
                 let err = io::Error::last_os_error();
                 match err.kind() {
                     ErrorKind::Interrupted => continue,
+                    ErrorKind::WouldBlock if let Some(stall) = nonblock_stall_timeout => {
+                        wait_writable(out.as_fd(), stall)?;
+                        continue;
+                    }
                     _ => return Err(err),
                 }
             }

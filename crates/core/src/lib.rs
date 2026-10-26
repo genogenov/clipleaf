@@ -27,7 +27,7 @@ pub use wl::{
 };
 
 pub use content_kind::{ContentKind, ContentKinds};
-pub use fd_io::{serve_bytes, serve_file};
+pub use fd_io::{serve_bytes, serve_bytes_nonblocking, serve_file, serve_file_nonblocking};
 pub use file_list::{FileListFormat, FileListScan};
 pub use log_writer::{Colors, LOGGER, debug_enabled, init_logging};
 pub use mime::{
