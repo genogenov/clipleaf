@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clipleaf_core::{serve_bytes_nonblocking, serve_file_nonblocking};
+use clipleaf_core::{serve_bytes_nonblocking, serve_file, serve_file_nonblocking};
 
 /// Three times a grown 1 MiB pipe: serving has to wait for the reader many times over.
 const LEN: usize = 3 << 20;
@@ -166,4 +166,37 @@ fn a_small_payload_into_a_regular_file_is_written_whole() {
         .read_to_end(&mut written)
         .unwrap();
     assert_eq!(written, b"hello, file");
+}
+
+#[test]
+fn a_payload_file_longer_than_its_recorded_length_serves_only_that_length() {
+    // The recorded length is the contract: a file that grew afterwards (or any other mismatch)
+    // must not leak its extra bytes into the paste. Both modes share the two-stage splice; a
+    // length under one stage-1 chunk and one over it.
+    let bytes = data(LEN);
+    let payload = Payload::new(&bytes);
+    for len in [100usize, (1 << 20) + (1 << 19)] {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let reading = slow_reader(reader, 1 << 20, Duration::ZERO);
+        let f = payload.1.try_clone().unwrap();
+        let (result, _) = serve_in_thread(move || {
+            serve_file_nonblocking(OwnedFd::from(writer), &f, len as u64, STALL)
+        });
+        result.unwrap();
+        assert!(
+            reading.join().unwrap() == bytes[..len],
+            "non-blocking, len {len}"
+        );
+
+        let (reader, writer) = std::io::pipe().unwrap();
+        let reading = slow_reader(reader, 1 << 20, Duration::ZERO);
+        let f = payload.1.try_clone().unwrap();
+        let (result, _) =
+            serve_in_thread(move || serve_file(OwnedFd::from(writer), &f, len as u64));
+        result.unwrap();
+        assert!(
+            reading.join().unwrap() == bytes[..len],
+            "blocking, len {len}"
+        );
+    }
 }

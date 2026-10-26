@@ -261,6 +261,9 @@ fn write_all_two_stage_splice(
     unsafe { fcntl(temp_fd_writer, F_SETPIPE_SZ, TEMP_PIPE_GROW_SIZE) };
 
     while temp_in_offset < len as i64 {
+        // Never past `len`: a payload file that grew after it was recorded must not leak its
+        // extra bytes into the paste.
+        let chunk = (len - temp_in_offset as u64).min(TEMP_PIPE_GROW_SIZE as u64) as usize;
         // SAFETY: the payload fd and both pipe ends are open, and temp_in_offset is a valid i64
         let mut pending_bytes = unsafe {
             splice(
@@ -268,7 +271,7 @@ fn write_all_two_stage_splice(
                 &mut temp_in_offset,
                 temp_fd_writer,
                 ptr::null_mut(),
-                TEMP_PIPE_GROW_SIZE as usize,
+                chunk,
                 0,
             )
         };

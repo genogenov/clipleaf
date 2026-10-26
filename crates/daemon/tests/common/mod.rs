@@ -448,6 +448,11 @@ impl Daemon {
         fs::File::from(OwnedFd::from(rx))
     }
 
+    /// Events in one `sendmsg`, with `fds` riding on it (so the daemon reads them together).
+    pub fn send_with_fds(&self, events: &[Vec<u8>], fds: &[std::os::fd::BorrowedFd<'_>]) {
+        self.peer.send_with_fds(&events.concat(), fds);
+    }
+
     /// One whole paste: everything the daemon writes until it closes the pipe.
     pub fn paste(&self, source: u32, mime: &[u8]) -> Vec<u8> {
         read_to_eof(self.paste_start(source, mime))

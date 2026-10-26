@@ -9,7 +9,6 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy)]
 pub struct WlDataControlSource {
     pub local_id: u32,
 }

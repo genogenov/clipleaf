@@ -79,39 +79,33 @@ impl DataOwner {
             }
             source.offer(s.get_message_writer(), &self.marker)?;
 
-            if let Some(old) = match primary {
+            match primary {
                 true => {
                     s.set_primary_selection(source.local_id)?;
-                    self.primary.replace(OwnSource {
-                        entry: entry.clone(),
-                        source,
-                    })
                 }
                 false => {
                     s.set_selection(source.local_id)?;
-                    self.clipboard.replace(OwnSource {
-                        entry: entry.clone(),
-                        source,
-                    })
                 }
-            } {
-                s.destroy_source(old.source)?;
             }
 
             Ok(())
         };
 
-        if res.is_err() {
-            s.destroy_source(source)?;
-            _ = self
-                .clipboard
-                .take_if(|x| x.source.local_id == source.local_id)
-                .or_else(|| {
-                    self.primary
-                        .take_if(|x| x.source.local_id == source.local_id)
-                });
+        if let Err(e) = res {
+            // in case the offer has been created and something fails after - we need to cleanup and destroy the source to avoid leaking a slot.
+            let _ = s.destroy_source(source);
+            return Err(e);
         }
-        res
+
+        let slot = if primary {
+            &mut self.primary
+        } else {
+            &mut self.clipboard
+        };
+        if let Some(old) = slot.replace(OwnSource { source, entry }) {
+            s.destroy_source(old.source)?;
+        }
+        Ok(())
     }
 
     pub fn on_cancelled(

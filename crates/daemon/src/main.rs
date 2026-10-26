@@ -17,7 +17,7 @@ use std::{
 use clipleaf_core::{
     WlBufferedStream, WlSessionEvent, WlSessionManager,
     ffi::poll::{PollEvents, PollFd, poll},
-    init_logging, log_debug, log_error, log_info, log_warn, pick_fetch_mimes,
+    init_logging, log_debug, log_error, log_info, pick_fetch_mimes,
 };
 
 use crate::{
@@ -242,7 +242,7 @@ fn run() -> io::Result<()> {
                             .try_push(job, MAX_PENDING_SERVES)
                             .is_none()
                     {
-                        log_warn!(
+                        log_debug!(
                             "The limit of pending serve jobs has been reached: {MAX_PENDING_SERVES}. Dropping new jobs until existing jobs drop below the limit."
                         );
                     }

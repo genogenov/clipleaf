@@ -263,3 +263,63 @@ fn pastes_still_queued_when_the_selection_changes_are_dropped() {
     );
     drop(busy);
 }
+
+#[test]
+fn a_paste_that_arrives_with_the_echo_of_our_own_selection_is_served() {
+    // Right after a restore the compositor echoes our selection, and pasters ask at once: when
+    // the echo and the paste are read together, only pastes from before the change may go.
+    let mut daemon = Daemon::start();
+    daemon.copy_new(&[(UTF8, b"served after the echo")]);
+    daemon.send(&[cleared()]);
+    let source = daemon.wait_restore();
+
+    let own = daemon.new_offer();
+    let mimes: Vec<&str> = source.mimes.iter().map(String::as_str).collect();
+    let (rx, tx) = std::io::pipe().unwrap();
+    daemon.send_with_fds(
+        &[
+            offer(own, &mimes),
+            selection(own),
+            clipleaf_test_common::raw::wire::msg(
+                source.id,
+                clipleaf_test_common::raw::proto::SOURCE_SEND,
+                &clipleaf_test_common::raw::wire::string(UTF8.as_bytes()),
+            ),
+        ],
+        &[std::os::fd::AsFd::as_fd(&tx)],
+    );
+    drop(tx);
+    let got = read_to_eof(std::fs::File::from(std::os::fd::OwnedFd::from(rx)));
+    assert_eq!(got, b"served after the echo");
+}
+
+#[test]
+fn pastes_beyond_the_pending_cap_get_eof_at_once_and_the_daemon_keeps_going() {
+    // 4 pasters that never read hold the 4 workers, 64 more wait in the queue (the cap): the
+    // next one is dropped right away instead of holding an fd, and nothing else changes.
+    let mut daemon = Daemon::start();
+    let text = big(4 << 20, 5);
+    daemon.copy_new(&[(UTF8, &text)]);
+    daemon.send(&[cleared()]);
+    let source = daemon.wait_restore();
+
+    let busy: Vec<_> = (0..4)
+        .map(|_| daemon.paste_start(source.id, UTF8.as_bytes()))
+        .collect();
+    let queued: Vec<_> = (0..64)
+        .map(|_| daemon.paste_start(source.id, UTF8.as_bytes()))
+        .collect();
+    let started = Instant::now();
+    let over = daemon.paste_start(source.id, UTF8.as_bytes());
+    assert_eq!(read_to_eof(over), b"");
+    assert!(
+        started.elapsed() < STALL,
+        "dropped only at the stall: {:?}",
+        started.elapsed()
+    );
+
+    drop(busy);
+    drop(queued);
+    let next = daemon.copy_new(&[(UTF8, b"still recording")]);
+    assert_eq!(next.sizes(), [(UTF8, 15)]);
+}
