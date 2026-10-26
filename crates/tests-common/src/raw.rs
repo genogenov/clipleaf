@@ -56,8 +56,12 @@ pub mod proto {
     pub const DEVICE_SELECTION: u16 = 1;
     pub const DEVICE_FINISHED: u16 = 2;
     pub const DEVICE_PRIMARY_SELECTION: u16 = 3;
+    // ext_data_control_device_v1 requests
+    pub const DEVICE_SET_SELECTION: u16 = 0;
+    pub const DEVICE_SET_PRIMARY_SELECTION: u16 = 2;
     // ext_data_control_source_v1
     pub const SOURCE_OFFER: u16 = 0;
+    pub const SOURCE_DESTROY: u16 = 1;
     pub const SOURCE_SEND: u16 = 0;
     pub const SOURCE_CANCELLED: u16 = 1;
     // ext_data_control_offer_v1

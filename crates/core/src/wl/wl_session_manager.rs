@@ -275,7 +275,7 @@ impl WlSessionManager {
                     }
                     DataControlDeviceEvent::Selection { offer_id } => {
                         if let Some(prior_selection) = tracker.selection(&offer_id)? {
-                            log_debug!("Destroying prior selection: {:?}", prior_selection);
+                            // log_debug!("Destroying prior selection: {:?}", prior_selection);
                             Self::drop_offer(router, tracker, writer, prior_selection)?;
                         }
 
@@ -285,10 +285,10 @@ impl WlSessionManager {
                         if let Some(prior_primary_selection) =
                             tracker.primary_selection(&offer_id)?
                         {
-                            log_debug!(
-                                "Destroying prior primary selection: {:?}",
-                                prior_primary_selection
-                            );
+                            // log_debug!(
+                            //     "Destroying prior primary selection: {:?}",
+                            //     prior_primary_selection
+                            // );
                             Self::drop_offer(router, tracker, writer, prior_primary_selection)?;
                         }
                         Ok(Some(WlSessionEvent::PrimarySelection { offer_id }))

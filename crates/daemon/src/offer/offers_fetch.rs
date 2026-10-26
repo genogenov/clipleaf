@@ -14,13 +14,13 @@ use clipleaf_core::{
         event_fd::EventFd,
         poll::{PollEvents, PollFd, PollResult, poll},
     },
-    log_error, pick_fetch_mimes,
+    log_error,
 };
 
 use crate::{
     index::IndexMsg,
     jobs::{JobData, JobList, JobOutcome},
-    storage::{EntryBuilder, MAX_FETCHED_TYPES, PayloadWriter},
+    storage::{EntryBuilder, PayloadWriter},
 };
 
 struct FetchOp {
@@ -28,46 +28,61 @@ struct FetchOp {
     writer: Option<PayloadWriter>,
 }
 
-pub fn start_fetch(
-    session: &mut WlSessionManager,
-    jobs: &mut JobList,
-    idle_timeout: Duration,
-    id_seq: u64,
+pub struct FetchJobDispatcher {
     payloads_dir: Arc<Path>,
     index_tx: Sender<IndexMsg>,
-) -> io::Result<()> {
-    if let Some(mimes) = session
-        .get_offer()
-        .map(|o| pick_fetch_mimes(o.offered_mime_types(), MAX_FETCHED_TYPES))
-        && !mimes.is_empty()
-    {
+    idle_timeout: Duration,
+}
+
+impl FetchJobDispatcher {
+    pub fn new(payloads_dir: Arc<Path>, index_tx: Sender<IndexMsg>, max_idle: Duration) -> Self {
+        Self {
+            payloads_dir,
+            index_tx,
+            idle_timeout: max_idle,
+        }
+    }
+
+    pub fn start_fetch(
+        &self,
+        session: &mut WlSessionManager,
+        is_primary: bool,
+        fetch_mimes: Vec<Mime<Cow<'static, str>>>,
+        jobs: &mut JobList,
+        id_seq: u64,
+    ) -> io::Result<()> {
+        if fetch_mimes.is_empty() {
+            return Ok(());
+        }
         let mut pipes = Vec::new();
-        for mime in &mimes {
+        for mime in &fetch_mimes {
             let (rx, tx) = io::pipe()?;
-            session.receive_offer(false, Some(mime.mime()), tx.into())?;
+            session.receive_offer(is_primary, Some(mime.mime()), tx.into())?;
             pipes.push(rx);
         }
 
-        let entry = EntryBuilder::new(id_seq, payloads_dir);
+        let entry = EntryBuilder::new(id_seq, self.payloads_dir.clone());
 
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)) // saturate instead of wrapping
             .unwrap_or(0);
 
+        let tx = self.index_tx.clone();
+        let max_idle = self.idle_timeout;
         jobs.start("fetch-selection", move |cancel| {
             fetch(
-                (pipes, mimes),
+                (pipes, fetch_mimes),
                 entry,
                 cancel,
-                idle_timeout,
-                index_tx,
+                max_idle,
+                tx,
                 id_seq,
                 now_ms,
             )
         })?;
+        Ok(())
     }
-    Ok(())
 }
 
 fn fetch(

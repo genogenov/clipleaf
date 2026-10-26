@@ -72,11 +72,11 @@ impl WlMessageRouter {
         if let Some(free_index) = self.find_free_client() {
             let slot = &mut self.client_interfaces[free_index];
             *slot = Slot::Live(interface);
-            log_debug!(
-                "Registered interface {:?} at client slot {}",
-                interface,
-                free_index
-            );
+            // log_debug!(
+            //     "Registered interface {:?} at client slot {}",
+            //     interface,
+            //     free_index
+            // );
             Ok(WlPendingId::new(free_index as u32, slot))
         } else {
             Err(Error::other("No free client slot available"))
@@ -107,7 +107,7 @@ impl WlMessageRouter {
                 )));
             }
             *slot = Slot::Live(interface);
-            log_debug!("Registered interface {:?} at server slot {}", interface, id);
+            // log_debug!("Registered interface {:?} at server slot {}", interface, id);
             Ok(id)
         }
     }
@@ -122,11 +122,11 @@ impl WlMessageRouter {
         };
         {
             *slot = Slot::Destroyed(interface);
-            log_debug!(
-                "Marked interface {:?} at client slot {} as destroyed",
-                interface,
-                object_id
-            );
+            // log_debug!(
+            //     "Marked interface {:?} at client slot {} as destroyed",
+            //     interface,
+            //     object_id
+            // );
             Ok(())
         }
     }

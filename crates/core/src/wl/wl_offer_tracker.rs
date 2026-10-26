@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{WlDataControlOffer, log_debug};
+use crate::WlDataControlOffer;
 
 pub struct WlOfferTracker {
     offers: [Option<WlDataControlOffer>; 8], // Something higher than 2 as the compositor sends offers before selection.
@@ -46,10 +46,10 @@ impl WlOfferTracker {
     }
 
     pub fn data_device_offer(&mut self, new_id: u32) -> Result<(), std::io::Error> {
-        log_debug!(
-            "Received DataControlDevice DataOffer with new_id {}",
-            new_id
-        );
+        // log_debug!(
+        //     "Received DataControlDevice DataOffer with new_id {}",
+        //     new_id
+        // );
 
         let candidate = self.offers.iter_mut().find(|offer| offer.is_none());
         if let Some(slot) = candidate {
@@ -80,10 +80,10 @@ impl WlOfferTracker {
     }
 
     pub fn selection(&mut self, offer_id: &Option<u32>) -> Result<Option<u32>, std::io::Error> {
-        log_debug!(
-            "Received DataControlDevice Selection with offer_id {:?}",
-            offer_id
-        );
+        // log_debug!(
+        //     "Received DataControlDevice Selection with offer_id {:?}",
+        //     offer_id
+        // );
         let previous_selection = self.selection_id;
         self.selection_id = *offer_id;
 
@@ -94,10 +94,10 @@ impl WlOfferTracker {
         &mut self,
         offer_id: &Option<u32>,
     ) -> Result<Option<u32>, std::io::Error> {
-        log_debug!(
-            "Received DataControlDevice PrimarySelection with offer_id {:?}",
-            offer_id
-        );
+        // log_debug!(
+        //     "Received DataControlDevice PrimarySelection with offer_id {:?}",
+        //     offer_id
+        // );
         let previous_primary_selection = self.primary_selection_id;
         self.primary_selection_id = *offer_id;
 

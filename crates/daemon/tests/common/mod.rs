@@ -13,6 +13,10 @@
 //! Every image type gets a Thumb record some time after its Insert, from one of two workers in
 //! any order, so `next_record` sets Thumb records aside (`thumbs`) and `wait_thumb` waits for
 //! the one of a given entry.
+//!
+//! When the daemon restores an entry it becomes the selection owner: the peer records the data
+//! sources it creates (`create_data_source`, `offer`, `destroy`, answered with `delete_id` like a
+//! compositor) and every `set_selection`, and a test pastes from a source with `paste`.
 #![allow(dead_code)] // each test file uses a different part
 
 pub mod wal;
@@ -20,8 +24,8 @@ pub mod wal;
 use std::{
     collections::VecDeque,
     fs,
-    io::Write,
-    os::fd::OwnedFd,
+    io::{Read, Write},
+    os::fd::{AsFd, OwnedFd},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicU32, Ordering},
@@ -127,6 +131,21 @@ pub fn id_and_type(name: &str) -> (u64, u64) {
         .unwrap_or((u64::MAX, u64::MAX))
 }
 
+/// A data source the daemon created to own a selection, with the types it offered.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub id: u32,
+    pub mimes: Vec<String>,
+    pub destroyed: bool,
+}
+
+/// A `set_selection` (or `set_primary_selection`) the daemon sent; `source` 0 is NULL.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetSelection {
+    pub primary: bool,
+    pub source: u32,
+}
+
 /// A `receive` the daemon sent: which offer, which type, and the write end it wants filled.
 pub struct Receive {
     pub offer: u32,
@@ -143,6 +162,11 @@ pub struct Daemon {
     thumbs: Vec<(u64, u32, Option<wal::Thumb>)>,
     /// Offers the daemon has destroyed so far.
     destroyed: Vec<u32>,
+    /// Data sources the daemon created, in order.
+    sources: Vec<Source>,
+    /// Every `set_selection` / `set_primary_selection`, in order, and how many a test consumed.
+    sets: Vec<SetSelection>,
+    sets_seen: usize,
     fds: VecDeque<OwnedFd>,
     child: Option<Guarded>,
     next_offer: u32,
@@ -195,6 +219,9 @@ impl Daemon {
             seen: 0,
             thumbs: Vec::new(),
             destroyed: Vec::new(),
+            sources: Vec::new(),
+            sets: Vec::new(),
+            sets_seen: 0,
             fds: VecDeque::new(),
             child: Some(Guarded::new(child)),
             next_offer: SERVER_ID_START,
@@ -311,12 +338,124 @@ impl Daemon {
                 if request.object_id >= SERVER_ID_START && request.opcode == OFFER_DESTROY {
                     self.destroyed.push(request.object_id);
                 }
+                self.record_source_side(&request);
                 if let Some(receive) = self.as_receive(&request) {
                     receives.push(receive);
                 }
             }
         }
         receives
+    }
+
+    /// The owner side: sources created, offered, destroyed, and selections set.
+    fn record_source_side(&mut self, request: &Request) {
+        let (id, op) = (request.object_id, request.opcode);
+        if id == MANAGER && op == MANAGER_CREATE_DATA_SOURCE {
+            self.sources.push(Source {
+                id: request.u32_at(0),
+                mimes: Vec::new(),
+                destroyed: false,
+            });
+        } else if id == DEVICE && (op == DEVICE_SET_SELECTION || op == DEVICE_SET_PRIMARY_SELECTION)
+        {
+            self.sets.push(SetSelection {
+                primary: op == DEVICE_SET_PRIMARY_SELECTION,
+                source: request.u32_at(0),
+            });
+        } else if id < SERVER_ID_START
+            && let Some(source) = self
+                .sources
+                .iter_mut()
+                .rev()
+                .find(|s| s.id == id && !s.destroyed)
+        {
+            match op {
+                SOURCE_OFFER => {
+                    let (mime, _) = request.string_at(0);
+                    source.mimes.push(String::from_utf8(mime.to_vec()).unwrap());
+                }
+                SOURCE_DESTROY => {
+                    source.destroyed = true;
+                    // As a compositor does: the id can be reused after this.
+                    self.peer
+                        .send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &id.to_ne_bytes()));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Reads requests until `done` holds (bounded by `WAIT`). Receives that arrive meanwhile are
+    /// kept for later `receives_*` calls only through their fds; tests that wait on the owner
+    /// side don't copy at the same time.
+    pub fn pump_until(&mut self, what: &str, mut done: impl FnMut(&Self) -> bool) {
+        let start = Instant::now();
+        while !done(self) {
+            assert!(start.elapsed() < WAIT, "clipleafd never: {what}");
+            let _ = self.receives_once();
+        }
+    }
+
+    /// Waits for the next `set_selection` / `set_primary_selection` the daemon sends.
+    pub fn next_set_selection(&mut self) -> SetSelection {
+        self.pump_until("set a selection", |d| d.sets.len() > d.sets_seen);
+        self.sets_seen += 1;
+        self.sets[self.sets_seen - 1]
+    }
+
+    /// Waits for the daemon to take the clipboard with a new source and returns it (its offers
+    /// come before the `set_selection`, in the same flush).
+    pub fn wait_restore(&mut self) -> Source {
+        let set = self.next_set_selection();
+        assert!(!set.primary && set.source != 0, "{set:?}");
+        self.source(set.source)
+    }
+
+    /// The newest source with this id.
+    pub fn source(&self, id: u32) -> Source {
+        self.sources
+            .iter()
+            .rev()
+            .find(|s| s.id == id)
+            .cloned()
+            .expect("a source with that id")
+    }
+
+    pub fn sources(&self) -> &[Source] {
+        &self.sources
+    }
+
+    /// Every selection set so far, including the ones already consumed.
+    pub fn sets(&self) -> &[SetSelection] {
+        &self.sets
+    }
+
+    /// Waits until the daemon destroys this source.
+    pub fn wait_source_destroyed(&mut self, id: u32) {
+        self.pump_until("destroyed its source", |d| {
+            d.sources.iter().any(|s| s.id == id && s.destroyed)
+        });
+    }
+
+    /// Asks the daemon's source for `mime`, as a pasting app does, and returns the read end.
+    pub fn paste_start(&self, source: u32, mime: &[u8]) -> fs::File {
+        let (rx, tx) = std::io::pipe().unwrap();
+        self.peer.send_with_fds(
+            &wire::msg(source, SOURCE_SEND, &wire::string(mime)),
+            &[tx.as_fd()],
+        );
+        drop(tx); // the daemon holds the only write end now
+        fs::File::from(OwnedFd::from(rx))
+    }
+
+    /// One whole paste: everything the daemon writes until it closes the pipe.
+    pub fn paste(&self, source: u32, mime: &[u8]) -> Vec<u8> {
+        read_to_eof(self.paste_start(source, mime))
+    }
+
+    /// Tells the daemon's source it lost the selection.
+    pub fn cancel(&self, source: u32) {
+        self.send(&[wire::msg(source, SOURCE_CANCELLED, &[])]);
     }
 
     fn as_receive(&mut self, request: &Request) -> Option<Receive> {
@@ -457,6 +596,29 @@ pub fn offer(id: u32, mimes: &[&str]) -> Vec<u8> {
 
 pub fn selection(id: u32) -> Vec<u8> {
     wire::msg(DEVICE, DEVICE_SELECTION, &id.to_ne_bytes())
+}
+
+/// The clipboard (or primary) is now empty: the owner left or cleared it.
+pub fn cleared() -> Vec<u8> {
+    selection(0)
+}
+
+/// Reads until EOF, waiting at most `WAIT` for each chunk.
+pub fn read_to_eof(mut pipe: fs::File) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let mut fds = [PollFd::new(pipe.as_fd(), PollEvents::IN)];
+        assert!(
+            matches!(poll(&mut fds, Some(WAIT)), Ok(PollResult::Ready(_))),
+            "the paste stalled after {} bytes",
+            out.len()
+        );
+        match pipe.read(&mut buf).unwrap() {
+            0 => return out,
+            n => out.extend_from_slice(&buf[..n]),
+        }
+    }
 }
 
 pub fn answer(receive: Receive, bytes: &[u8]) {

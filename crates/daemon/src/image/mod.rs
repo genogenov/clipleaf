@@ -1,12 +1,11 @@
 mod encoder;
 
 use std::{
-    collections::VecDeque,
     fs::File,
     io::{self},
     panic::{self, AssertUnwindSafe},
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, PoisonError, mpsc::Sender},
+    sync::{Arc, mpsc::Sender},
     thread,
     time::Instant,
 };
@@ -17,6 +16,7 @@ use crate::{
     image::encoder::{ImageProcessingFail, ImageSourceReader, make_thumbnail},
     index::{IndexMsg, SnapshotHandle},
     storage::TypeMeta,
+    work_queue::WorkQueue,
 };
 
 const LOWER_THREAD_PRIORITY_BY: u8 = 10;
@@ -41,57 +41,8 @@ pub enum ImageSource {
     File(PathBuf),
 }
 
-pub struct ImageQueue {
-    state: Mutex<State>,
-    ready: Condvar,
-}
-struct State {
-    jobs: VecDeque<ImageJob>,
-    closed: bool,
-}
-impl ImageQueue {
-    pub fn new() -> Self {
-        ImageQueue {
-            state: Mutex::new(State {
-                jobs: VecDeque::new(),
-                closed: false,
-            }),
-            ready: Condvar::new(),
-        }
-    }
-
-    pub fn push(&self, job: ImageJob) {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .jobs
-            .push_back(job);
-        self.ready.notify_one();
-    }
-    fn pop_newest(&self) -> Option<ImageJob> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        while state.jobs.is_empty() && !state.closed {
-            state = self
-                .ready
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-
-        if state.closed {
-            return None;
-        }
-
-        state.jobs.pop_back()
-    }
-
-    // pub fn close(&self) {
-    //     self.state.lock().unwrap().closed = true;
-    //     self.ready.notify_all();
-    // }
-}
-
 pub fn spawn_workers(
-    queue: Arc<ImageQueue>,
+    queue: Arc<WorkQueue<ImageJob>>,
     index_tx: Sender<IndexMsg>,
     snap: SnapshotHandle,
 ) -> io::Result<()> {
@@ -104,7 +55,7 @@ pub fn spawn_workers(
     Ok(())
 }
 
-fn run(queue: &ImageQueue, index_tx: &Sender<IndexMsg>, snap: &SnapshotHandle) {
+fn run(queue: &WorkQueue<ImageJob>, index_tx: &Sender<IndexMsg>, snap: &SnapshotHandle) {
     if let Err(e) = lower_current_thread_priority(LOWER_THREAD_PRIORITY_BY) {
         log_warn!("image worker nice: {e}")
     }

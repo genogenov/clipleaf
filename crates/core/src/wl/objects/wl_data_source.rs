@@ -9,6 +9,7 @@ use crate::{
     },
 };
 
+#[derive(Clone, Copy)]
 pub struct WlDataControlSource {
     pub local_id: u32,
 }
@@ -65,7 +66,7 @@ impl WlDataControlSource {
         Err(std::io::Error::other("Unknown opcode"))
     }
 
-    pub fn destroy(self, writer: WlMessageWriter) -> std::io::Result<()> {
+    pub(crate) fn destroy(self, writer: WlMessageWriter) -> std::io::Result<()> {
         let msg = writer
             .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Destroy, self.local_id)?;
         msg.end()

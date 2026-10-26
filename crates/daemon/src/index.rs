@@ -13,11 +13,12 @@ use std::{
 use clipleaf_core::{ContentKind, log_debug, log_error, log_warn};
 
 use crate::{
-    image::{ImageJob, ImageQueue, ImageSource},
+    image::{ImageJob, ImageSource},
     storage::{
         Data, Entry, TypeMeta,
         wal::log::{LogMsg, Restored},
     },
+    work_queue::WorkQueue,
 };
 
 pub enum IndexMsg {
@@ -67,7 +68,7 @@ struct Index {
     pinned_count: usize,
     shared: SnapshotHandle,
     log_sender: Sender<LogMsg>,
-    img_queue: Arc<ImageQueue>,
+    img_queue: Arc<WorkQueue<ImageJob>>,
     payload_dir: Arc<Path>,
 }
 
@@ -250,7 +251,7 @@ pub fn spawn_index(
     history_count_limit: usize,
     log_tx: Sender<LogMsg>,
     restored: Restored,
-    img_queue: Arc<ImageQueue>,
+    img_queue: Arc<WorkQueue<ImageJob>>,
     payload_dir: Arc<Path>,
 ) -> io::Result<(Sender<IndexMsg>, SnapshotHandle)> {
     let (tx, rx) = mpsc::channel();

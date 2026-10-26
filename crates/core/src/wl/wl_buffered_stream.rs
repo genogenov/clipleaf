@@ -258,7 +258,7 @@ impl WriteBuffer {
                 "Cannot flush more bytes than are in the buffer",
             ));
         }
-        log_debug!("Flushing {} bytes to the stream", n);
+        // log_debug!("Flushing {} bytes to the stream", n);
         let sent = socket.write(&self.buf[..n], self.fds.peek_out_fds(), mode)?;
         if sent > 0 {
             self.fds.clear_and_close_out_fds(); // they went with the first byte

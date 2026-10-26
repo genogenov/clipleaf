@@ -15,7 +15,7 @@ pub use wl::{
         wl_data_managers::DataDeviceManagerExt,
         wl_data_managers::ExtDataControlManagerV1,
         wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
-        wl_data_source::WlDataControlSourceEvent,
+        wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
         wl_display::WlDisplay,
         wl_registry::{BoundInterface, WlSeat},
     },

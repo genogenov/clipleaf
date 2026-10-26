@@ -5,9 +5,8 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
 use crate::{
     index::Item,
-    storage::{
-        Data, MAX_FETCHED_TYPES, PayloadFile, ThumbNail, TypeData, TypeMeta, wal::error::WalError,
-    },
+    offer::MAX_FETCHED_TYPES,
+    storage::{Data, PayloadFile, ThumbNail, TypeData, TypeMeta, wal::error::WalError},
 };
 
 pub const IDENTIFIER: [u8; 14] = *b"CLIPLEAF WAL\0\0";
@@ -219,7 +218,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
     //     salt
     // );
     let record_checksum = xxh3_64_with_seed(&buff[..len as usize], salt);
-    log_debug!("Reading checksum at offset: {}", len);
+    // log_debug!("Reading checksum at offset: {}", len);
     let (stored_checksum, _) = read_u64(&buff[len as usize..total_len as usize])?;
 
     // log_debug!(
