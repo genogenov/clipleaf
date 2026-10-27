@@ -8,7 +8,7 @@ use crate::{
     offer::MAX_FETCHED_TYPES,
     storage::{
         Data, PayloadFile, ThumbNail, TypeData, TypeMeta,
-        wal::{error::WalError, wal_writer::WalWriter},
+        wal::{error::WalError, record_writer::RecordWriter},
     },
 };
 
@@ -110,7 +110,7 @@ pub fn decode_header(buff: &[u8]) -> Result<Header, WalError> {
 }
 
 /// encoded as len, type, id, seq, time, pinned, entry count, [entry], checksum
-pub fn encode_append(item: &Item, mut writer: WalWriter, salt: u64) -> Result<usize, WalError> {
+pub fn encode_append(item: &Item, mut writer: RecordWriter, salt: u64) -> Result<usize, WalError> {
     writer.u8(INSERT_TYPE);
     writer.u64(item.entry.id);
     writer.u64(item.seq);
@@ -125,7 +125,7 @@ pub fn encode_append(item: &Item, mut writer: WalWriter, salt: u64) -> Result<us
     writer.finish_with_checksum_salt(salt)
 }
 
-pub fn encode_delete(id: u64, mut writer: WalWriter, salt: u64) -> Result<usize, WalError> {
+pub fn encode_delete(id: u64, mut writer: RecordWriter, salt: u64) -> Result<usize, WalError> {
     writer.u8(DELETE_TYPE);
     writer.u64(id);
     writer.finish_with_checksum_salt(salt)
@@ -135,7 +135,7 @@ pub fn encode_touch(
     id: u64,
     seq: u64,
     time_ms: u64,
-    mut writer: WalWriter,
+    mut writer: RecordWriter,
     salt: u64,
 ) -> Result<usize, WalError> {
     // type
@@ -151,7 +151,7 @@ pub fn encode_thumb(
     id: u64,
     type_index: u32,
     meta: &TypeMeta,
-    mut writer: WalWriter,
+    mut writer: RecordWriter,
     salt: u64,
 ) -> Result<usize, WalError> {
     // type
@@ -361,7 +361,7 @@ fn decode_type_meta(buff: &[u8]) -> Result<(Option<TypeMeta>, &[u8]), WalError> 
 }
 
 /// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes
-fn encode_stored_type_data(t: &TypeData, writer: &mut WalWriter) -> Result<(), WalError> {
+fn encode_stored_type_data(t: &TypeData, writer: &mut RecordWriter) -> Result<(), WalError> {
     log_debug!("mime len: {}", t.mime.mime().len());
     writer.len32_prefixed(t.mime.mime().as_bytes());
     writer.u64(t.size);
@@ -384,7 +384,7 @@ fn encode_stored_type_data(t: &TypeData, writer: &mut WalWriter) -> Result<(), W
 }
 
 /// encoded as type meta byte, type metadata
-fn encode_type_meta(meta: &Option<&TypeMeta>, writer: &mut WalWriter) -> Result<(), WalError> {
+fn encode_type_meta(meta: &Option<&TypeMeta>, writer: &mut RecordWriter) -> Result<(), WalError> {
     match meta {
         Some(meta) => match meta {
             TypeMeta::FileList { items } => {

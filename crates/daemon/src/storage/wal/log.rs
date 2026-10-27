@@ -21,10 +21,11 @@ use crate::{
         Data, Entry, entry,
         wal::{
             encoder::{
-                HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, decode_record, encode_append,
-                encode_delete, encode_thumb, encode_touch,
+                HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, encode_append, encode_delete,
+                encode_thumb, encode_touch,
             },
             error::WalError,
+            record_reader::WalReader,
             wal_file::WalFile,
         },
     },
@@ -75,7 +76,7 @@ pub struct WriteAheadLog {
 // TODO: split, Result<..,WalError> control flow
 
 impl WriteAheadLog {
-    pub fn open(base_dir: Arc<Path>, payloads: Arc<Path>) -> io::Result<Self> {
+    pub fn open_restore(base_dir: Arc<Path>, payloads: Arc<Path>) -> io::Result<(Self, Restored)> {
         let tmp_wal_path = base_dir.join(TMP_WAL_FILE_NAME);
         match fs::remove_file(&tmp_wal_path) {
             Err(e) if e.kind() != ErrorKind::NotFound => {
@@ -85,9 +86,13 @@ impl WriteAheadLog {
         };
 
         let wal_path = base_dir.join(WAL_FILE_NAME);
-        let wal_file = WalFile::open_or_create(&wal_path)?;
+        let mut reader = WalFile::open_or_create(&wal_path, MAX_RECORD_LEN * 5)?;
+
+        let (by_id, max_seq_seen) = Self::read_all_records(&mut reader);
+        let wal_file = reader.finish()?;
+
         let next_min_seq = wal_file.header().seq_snapshot;
-        Ok(Self {
+        let mut wal = Self {
             wal_file,
             base: base_dir,
             payloads,
@@ -101,7 +106,11 @@ impl WriteAheadLog {
             live_records: HashMap::new(),
             live_size: 0,
             next_min_seq,
-        })
+        };
+
+        let restored = Self::restore(&mut wal, by_id, max_seq_seen)?;
+
+        Ok((wal, restored))
     }
 
     pub fn compact_if_necessary(&mut self) -> io::Result<bool> {
@@ -179,39 +188,33 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    pub fn restore(&mut self) -> io::Result<Restored> {
-        log_debug!("Begin WAL restore..");
-        let mut buff = Vec::new();
-        let bytes = self.wal_file.read_to_end(&mut buff)?;
+    fn read_all_records(reader: &mut WalReader) -> (HashMap<u64, RestoreItem>, u64) {
         let mut by_id: HashMap<u64, RestoreItem> = HashMap::new();
 
-        let mut offset: usize = 0;
         let mut max_seq_seen = 0;
-        while offset < bytes {
-            let entry = match decode_record(&buff[offset..], self.wal_file.header().salt) {
+        while let Some(entry_res) = reader.next() {
+            let entry = match entry_res {
                 Ok(tuple) => tuple,
                 Err(e) => match e {
                     WalError::BadIdentifier
                     | WalError::UnsupportedVersion(_)
                     | WalError::Corrupted
                     | WalError::RecordTooLarge => {
-                        let new_len = HEADER_LEN + offset;
-                        log_error!(
-                            "Failed reading entry. Rewinding to last known good len {}. Error: {e}",
-                            new_len
-                        );
-                        self.wal_file.set_position(new_len as u64)?;
-                        log_debug!("WAL reverted to len {}", new_len);
+                        log_error!("Failed reading entry - skipping rest. Error: {e}");
                         break;
                     }
-                    WalError::UnknownType((read, t)) => {
+                    WalError::UnknownType((_, t)) => {
                         log_warn!("Encountered unknown entry type {t} - skipping.");
-                        offset += read as usize;
                         continue;
+                    }
+                    WalError::IoError(error) => {
+                        log_error!("Failed reading entry with I/O error: {error}. Skipping rest.",);
+                        break;
                     }
                 },
             };
-            offset += entry.size_on_disk as usize;
+
+            log_debug!("restore entry: {:?}", entry.op);
 
             match entry.op {
                 RestoreOp::Insert(item) => {
@@ -251,6 +254,18 @@ impl WriteAheadLog {
                 }
             }
         }
+
+        (by_id, max_seq_seen)
+    }
+
+    fn restore(
+        &mut self,
+        mut by_id: HashMap<u64, RestoreItem>,
+        max_seq_seen: u64,
+    ) -> io::Result<Restored> {
+        log_debug!("Begin WAL restore..");
+        // let mut buff = Vec::new();
+        //let bytes = self.wal_file.read_to_end(&mut buff)?;
 
         let next_seq = match max_seq_seen.checked_add(1) {
             Some(next) => next,
@@ -353,6 +368,7 @@ impl WriteAheadLog {
                 },
             );
             self.live_size += item.size_on_disk as u64;
+            log_debug!("live size : {}", self.live_size);
             items.push(history_item);
         }
 

@@ -7,12 +7,12 @@ pub struct WriteBuffer {
     pub(super) pos: usize,
 }
 
-pub struct WalWriter<'a> {
+pub struct RecordWriter<'a> {
     buffer: &'a mut WriteBuffer,
     start: usize,
 }
 
-impl<'a> WalWriter<'a> {
+impl<'a> RecordWriter<'a> {
     pub fn start(buffer: &'a mut WriteBuffer) -> Self {
         let start = buffer.buff.len();
         buffer.buff.extend_from_slice(&[0; 4]); // length placeholder, filled in by finish()

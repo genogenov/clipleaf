@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File, OpenOptions},
     hash::{BuildHasher, Hasher, RandomState},
-    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{self, ErrorKind, Read, Seek, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::Path,
 };
@@ -11,7 +11,8 @@ use clipleaf_core::{log_debug, log_error, log_warn};
 use crate::storage::wal::{
     encoder::{HEADER_LEN, Header, MAX_RECORD_LEN, decode_header, encode_header},
     error::WalError,
-    wal_writer::{WalWriter, WriteBuffer},
+    record_reader::WalReader,
+    record_writer::{RecordWriter, WriteBuffer},
 };
 
 pub struct WalFile {
@@ -22,6 +23,18 @@ pub struct WalFile {
 }
 
 impl WalFile {
+    pub fn new(file: File, header: Header, len: u64) -> Self {
+        Self {
+            file,
+            header,
+            len,
+            write_buff: WriteBuffer {
+                buff: Vec::with_capacity(MAX_RECORD_LEN),
+                pos: 0,
+            },
+        }
+    }
+
     pub fn create_or_overwrite(path: &Path, seq_snapshot: u64) -> io::Result<Self> {
         match fs::remove_file(path) {
             Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
@@ -54,7 +67,7 @@ impl WalFile {
         })
     }
 
-    pub fn open_or_create(path: &Path) -> io::Result<Self> {
+    pub fn open_or_create(path: &Path, max_alloc: usize) -> io::Result<WalReader> {
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -75,6 +88,7 @@ impl WalFile {
                                 WalError::BadIdentifier
                                 | WalError::UnsupportedVersion(_)
                                 | WalError::RecordTooLarge
+                                | WalError::IoError(_)
                                 | WalError::UnknownType(_) => {
                                     log_warn!(
                                         "WAL Error during header parsing, resetting. Error: {e}"
@@ -101,22 +115,13 @@ impl WalFile {
                 }
             }
         }?;
-        let pos = file.stream_position()?;
 
-        Ok(Self {
-            file,
-            len: pos,
-            header,
-            write_buff: WriteBuffer {
-                buff: Vec::with_capacity(MAX_RECORD_LEN),
-                pos: 0,
-            },
-        })
+        WalReader::new(file, header, max_alloc)
     }
 
-    pub fn begin_record(&mut self) -> WalWriter<'_> {
+    pub fn begin_record(&mut self) -> RecordWriter<'_> {
         self.write_buff.buff.truncate(self.write_buff.pos);
-        WalWriter::start(&mut self.write_buff)
+        RecordWriter::start(&mut self.write_buff)
     }
 
     pub fn flush(&mut self) -> io::Result<()> {
@@ -144,23 +149,8 @@ impl WalFile {
         }
     }
 
-    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        let res = self.file.read_to_end(buf)?;
-        self.len += res as u64;
-        Ok(res)
-    }
-
     pub fn sync(&self) -> io::Result<()> {
         self.file.sync_data()
-    }
-
-    pub fn set_position(&mut self, pos: u64) -> io::Result<u64> {
-        self.file.set_len(pos)?;
-        let res = self.file.seek(SeekFrom::End(0));
-        if res.is_ok() {
-            self.len = pos;
-        }
-        res
     }
 
     pub fn try_trim(&mut self) -> bool {

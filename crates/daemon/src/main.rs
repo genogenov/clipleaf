@@ -163,10 +163,8 @@ fn main() -> ExitCode {
 }
 
 fn init_wal(store: &FsDataStore, seq_counter: &mut u64) -> io::Result<(Sender<LogMsg>, Restored)> {
-    log_debug!("Opening WAL file..");
-    let mut log = WriteAheadLog::open(store.wal_dir(), store.payloads_dir())?;
-    log_debug!("Initiating WAL restore..");
-    let restored = log.restore()?;
+    log_debug!("Opening WAL file and restoring..");
+    let (log, restored) = WriteAheadLog::open_restore(store.wal_dir(), store.payloads_dir())?;
     *seq_counter = restored.next_seq;
     log_debug!("Spawning WAL..");
     let log_tx = log.start()?;
