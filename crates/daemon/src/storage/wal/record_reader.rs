@@ -60,14 +60,13 @@ impl WalReader {
             let available = &self.buf[self.start..self.filled];
             if let Some(len_bytes) = available.first_chunk::<4>() {
                 let len = u32::from_le_bytes(*len_bytes);
-                let total = len as usize + 8;
+                let total = len.saturating_add(8) as usize;
                 if len < 5 || total > MAX_RECORD_LEN {
                     self.done = true;
                     return Some(Err(WalError::Corrupted));
                 }
                 if available.len() >= total {
-                    let rec =
-                        decode_record(&available[..total], len, total as u32, self.header.salt);
+                    let rec = decode_record(&available[..total], self.header.salt);
                     self.start += total;
                     if rec.is_ok() || matches!(rec, Err(WalError::UnknownType(_))) {
                         self.offset += total as u64;

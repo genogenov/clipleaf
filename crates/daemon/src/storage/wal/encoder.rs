@@ -164,28 +164,33 @@ pub fn encode_thumb(
     writer.finish_with_checksum_salt(salt)
 }
 
-pub fn decode_record(
-    buff: &[u8],
-    record_len: u32,
-    total_len: u32,
-    salt: u64,
-) -> Result<RestoreRecord, WalError> {
-    let record_checksum = xxh3_64_with_seed(&buff[..record_len as usize], salt);
-    let (stored_checksum, _) = read_u64(&buff[record_len as usize..total_len as usize])?;
+pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
+    let (len, _rest) = read_u32(buff)?;
+
+    let total_len = len.saturating_add(8);
+    if len < 5 || total_len > MAX_RECORD_LEN as u32 || buff.len() < total_len as usize {
+        return Err(WalError::Corrupted);
+    }
+
+    let record_checksum =
+        xxh3_64_with_seed(buff.get(..len as usize).ok_or(WalError::Corrupted)?, salt);
+    let (stored_checksum, _) = read_u64(
+        buff.get(len as usize..total_len as usize)
+            .ok_or(WalError::Corrupted)?,
+    )?;
 
     if record_checksum != stored_checksum {
         log_error!("Record checksums do not match.");
         return Err(WalError::Corrupted);
     }
 
-    let rest = &buff[4..record_len as usize];
+    let rest = &buff[4..len as usize];
 
     let (t, rest) = read_u8(rest)?;
 
     match t {
         INSERT_TYPE => {
             let (id, rest) = read_u64(rest)?;
-            // log_debug!("decode: entry id: {}", id);
 
             let (seq, rest) = read_u64(rest)?;
             let (time_ms, rest) = read_u64(rest)?;
