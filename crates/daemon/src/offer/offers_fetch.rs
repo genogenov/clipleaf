@@ -4,7 +4,10 @@ use std::{
     iter,
     os::fd::AsFd,
     path::Path,
-    sync::{Arc, mpsc::Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Sender},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -19,7 +22,7 @@ use clipleaf_core::{
 
 use crate::{
     index::IndexMsg,
-    jobs::{JobData, JobList, JobOutcome},
+    jobs::{JobData, JobId, JobList, JobOutcome},
     storage::{EntryBuilder, PayloadWriter},
 };
 
@@ -50,9 +53,9 @@ impl FetchJobDispatcher {
         fetch_mimes: Vec<Mime<Cow<'static, str>>>,
         jobs: &mut JobList,
         id_seq: u64,
-    ) -> io::Result<()> {
+    ) -> io::Result<Option<JobId>> {
         if fetch_mimes.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let mut pipes = Vec::new();
         for mime in &fetch_mimes {
@@ -80,8 +83,8 @@ impl FetchJobDispatcher {
                 id_seq,
                 now_ms,
             )
-        })?;
-        Ok(())
+        })
+        .map(Some)
     }
 }
 
@@ -127,16 +130,20 @@ fn fetch(
                     .map(|op| (op.mime.mime().clone(), op.size))
                     .collect();
 
-                if !result.is_empty()
-                    && let Err(e) = index_tx.send(IndexMsg::Insert {
+                if !result.is_empty() {
+                    let (done_tx, done_rx) = mpsc::sync_channel(1);
+                    if let Err(e) = index_tx.send(IndexMsg::Insert {
                         seq: id_seq,
                         time_ms: now_ms,
                         entry,
-                    })
-                {
-                    return JobOutcome::Failed(io::Error::other(format!(
-                        "Failed to send msg to Indexer: {e}"
-                    )));
+                        done_signal: done_tx,
+                    }) {
+                        return JobOutcome::Failed(io::Error::other(format!(
+                            "Failed to send msg to Indexer: {e}"
+                        )));
+                    }
+                    // just as long as the index completed - one way or another.
+                    let _ = done_rx.recv();
                 }
                 return JobOutcome::Data(JobData::Fetch(result));
             }
@@ -279,12 +286,15 @@ mod tests {
         idle: Duration,
     ) -> (JobOutcome, Option<Entry>) {
         let (tx, rx): (Sender<IndexMsg>, Receiver<IndexMsg>) = mpsc::channel();
-        let entry = EntryBuilder::new(ID, Arc::from(dir.0.as_path()));
-        let outcome = fetch((readers, mimes(names)), entry, cancel, idle, tx, ID, 0);
-        let sent = rx.try_recv().ok().and_then(|m| match m {
-            IndexMsg::Insert { entry, .. } => Some(entry),
+        // Stands in for the index thread: fetch waits until the index is done with its Insert
+        // (done_signal dropped here). No Insert: fetch drops tx on return and recv gets Err.
+        let index = thread::spawn(move || match rx.recv() {
+            Ok(IndexMsg::Insert { entry, .. }) => Some(entry),
             _ => None,
         });
+        let entry = EntryBuilder::new(ID, Arc::from(dir.0.as_path()));
+        let outcome = fetch((readers, mimes(names)), entry, cancel, idle, tx, ID, 0);
+        let sent = index.join().unwrap();
         (outcome, sent)
     }
 

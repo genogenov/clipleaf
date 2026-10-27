@@ -22,7 +22,7 @@ use clipleaf_core::{
 
 use crate::{
     index::SnapshotHandle,
-    jobs::{JobData, JobList, JobOutcome, JobResult},
+    jobs::{JobData, JobId, JobList, JobOutcome, JobResult},
     offer::{
         DataOwner, MAX_FETCHED_TYPES, MAX_PENDING_SERVES, RESTORE_ON_CLEAR, RESTORE_ON_START,
         TRACK_PRIMARY_SELECTION,
@@ -30,7 +30,7 @@ use crate::{
         serve::{ServeJob, spawn_servers},
     },
     storage::{
-        FsDataStore,
+        FsDataStore, MAX_ENTRY_ID,
         wal::log::{LogMsg, Restored, WriteAheadLog},
     },
     work_queue::WorkQueue,
@@ -47,6 +47,10 @@ struct Daemon {
     jobs: JobList,
     snapshot: SnapshotHandle,
     fetch_dispatcher: FetchJobDispatcher,
+    pending_main_fetch: Option<JobId>,
+    pending_primary_fetch: Option<JobId>,
+    pending_main_restore: Option<JobId>,
+    pending_primary_restore: Option<JobId>,
     _store: FsDataStore,
 }
 impl Daemon {
@@ -98,6 +102,10 @@ impl Daemon {
             session,
             snapshot,
             fetch_dispatcher: FetchJobDispatcher::new(payloads_dir, index_tx, FETCH_IDLE_TIMEOUT),
+            pending_main_fetch: None,
+            pending_main_restore: None,
+            pending_primary_fetch: None,
+            pending_primary_restore: None,
             _store: store,
         })
     }
@@ -113,39 +121,67 @@ impl Daemon {
         };
         match offer {
             Some(offer) => {
+                if is_primary {
+                    self.pending_primary_restore = None;
+                } else {
+                    self.pending_main_restore = None;
+                }
                 if self.data_owner.is_ours(offer) {
                     log_debug!("Detected our offer. Skipping.");
                     return;
                 }
+                if self.seq_counter >= MAX_ENTRY_ID {
+                    log_error!(
+                        "entry ids exhausted ({MAX_ENTRY_ID}): not recording new copies. This is probably a bug."
+                    );
+                    return;
+                }
                 let offered_mimes = offer.offered_mime_types();
                 let fetch_mimes = pick_fetch_mimes(offered_mimes, MAX_FETCHED_TYPES);
-                if let Err(e) = self.fetch_dispatcher.start_fetch(
+                match self.fetch_dispatcher.start_fetch(
                     &mut self.session,
                     is_primary,
                     fetch_mimes,
                     &mut self.jobs,
                     self.seq_counter,
                 ) {
-                    log_error!("Failed to start fetch offer job: {e}");
+                    Ok(job_id) => {
+                        if is_primary {
+                            self.pending_primary_fetch = job_id;
+                        } else {
+                            self.pending_main_fetch = job_id;
+                        }
+                    }
+                    Err(e) => {
+                        log_error!("Failed to start fetch offer job: {e}");
+                    }
                 }
-                self.seq_counter = self.seq_counter.wrapping_add(1);
+                self.seq_counter += 1;
             }
             None => {
                 if (first_selection_event && RESTORE_ON_START)
                     || (!first_selection_event && RESTORE_ON_CLEAR)
                 {
                     log_debug!("Restoring last history entry");
-                    if let Some(item) = self.snapshot.get_clone().items.first()
-                        && let Err(e) = self.data_owner.restore(
-                            &mut self.session,
-                            item.entry.clone(),
-                            is_primary,
-                        )
-                    {
-                        log_error!("Failed to restore selection to last history entry: {e}");
+                    if is_primary && self.pending_primary_fetch.is_some() {
+                        self.pending_primary_restore = self.pending_primary_fetch;
+                    } else if !is_primary && self.pending_main_fetch.is_some() {
+                        self.pending_main_restore = self.pending_main_fetch;
+                    } else {
+                        self.restore_selection_with_latest(is_primary);
                     }
                 }
             }
+        }
+    }
+
+    fn restore_selection_with_latest(&mut self, is_primary: bool) {
+        if let Some(item) = self.snapshot.get_clone().items.first()
+            && let Err(e) =
+                self.data_owner
+                    .restore(&mut self.session, item.entry.clone(), is_primary)
+        {
+            log_error!("Failed to restore selection to last history entry: {e}");
         }
     }
 }
@@ -202,9 +238,28 @@ fn run() -> io::Result<()> {
         if job_events.has_any(PollEvents::IN) {
             daemon.jobs.reset_wait_event()?;
             while let Some(msg) = daemon.jobs.try_next_done() {
+                // clear pending jobs and run restore if needed.
+                daemon.pending_main_fetch.take_if(|id| *id == msg.id);
+                daemon.pending_primary_fetch.take_if(|id| *id == msg.id);
+
+                if daemon
+                    .pending_main_restore
+                    .take_if(|id| *id == msg.id)
+                    .is_some()
+                {
+                    daemon.restore_selection_with_latest(false);
+                }
+                if daemon
+                    .pending_primary_restore
+                    .take_if(|id| *id == msg.id)
+                    .is_some()
+                {
+                    daemon.restore_selection_with_latest(true);
+                }
+
                 match msg.result {
                     JobResult::Done(JobOutcome::Data(JobData::Fetch(fetch_result))) => {
-                        log_info!("job {}: {fetch_result:?} in {:?}", msg.id, msg.elapsed)
+                        log_info!("job {}: {fetch_result:?} in {:?}", msg.id, msg.elapsed);
                     }
                     JobResult::Done(JobOutcome::Cancelled) => {
                         log_debug!("job {} cancelled", msg.id)

@@ -18,7 +18,7 @@ use clipleaf_core::{log_debug, log_error, log_info, log_warn};
 use crate::{
     index::Item,
     storage::{
-        Data, Entry, entry,
+        Data, Entry, RESTORE_ID_LIMIT, entry,
         wal::{
             encoder::{
                 HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, encode_append, encode_delete,
@@ -265,17 +265,17 @@ impl WriteAheadLog {
         // let mut buff = Vec::new();
         //let bytes = self.wal_file.read_to_end(&mut buff)?;
 
-        let next_seq = match max_seq_seen.checked_add(1) {
-            Some(next) => next,
-            None => {
-                log_warn!(
-                    "history log has an impossible seq ({max_seq_seen}), starting with empty history"
-                );
-                self.wal_file.reset()?;
-                by_id.clear();
-                0
-            }
-        };
+        let next_seq = max_seq_seen.saturating_add(1);
+        self.next_min_seq = max(self.wal_file.header().seq_snapshot, next_seq);
+        if self.next_min_seq >= RESTORE_ID_LIMIT {
+            log_warn!(
+                "history ids/seqs out of range ({}): starting with an empty history. This is probably a bug.",
+                self.next_min_seq
+            );
+            self.wal_file.reset()?;
+            by_id.clear();
+            self.next_min_seq = self.wal_file.header().seq_snapshot;
+        }
 
         let len = by_id.len();
         log_debug!("Total entries to restore: {}", len);
@@ -370,7 +370,6 @@ impl WriteAheadLog {
         }
 
         log_debug!("Restored {} entries.", items.len());
-        self.next_min_seq = max(self.wal_file.header().seq_snapshot, next_seq);
         Ok(Restored {
             items,
             by_key,

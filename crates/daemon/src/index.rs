@@ -5,7 +5,7 @@ use std::{
     path::Path,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, Sender, SyncSender},
     },
     thread,
 };
@@ -26,6 +26,7 @@ pub enum IndexMsg {
         seq: u64,
         time_ms: u64,
         entry: Entry,
+        done_signal: SyncSender<()>,
     },
     SetThumb {
         id: u64,
@@ -87,7 +88,8 @@ impl Index {
                     seq,
                     time_ms,
                     entry,
-                } => self.insert(seq, time_ms, entry),
+                    done_signal,
+                } => self.insert(seq, time_ms, entry, done_signal),
                 IndexMsg::SetThumb {
                     id,
                     type_index,
@@ -97,7 +99,7 @@ impl Index {
         }
     }
 
-    fn insert(&mut self, seq: u64, time_ms: u64, mut entry: Entry) {
+    fn insert(&mut self, seq: u64, time_ms: u64, mut entry: Entry, done_signal: SyncSender<()>) {
         let mut items = self.current.items.clone();
         if let Some(id) = self.by_key.get(&entry.key) {
             // duplicate - move to front and drop the msg.
@@ -175,6 +177,7 @@ impl Index {
             );
             self.img_queue.push(imgjob);
         }
+        let _ = done_signal.try_send(());
     }
 
     fn image_jobs<'a>(&'a self, entry: &'a Entry) -> impl Iterator<Item = ImageJob> + 'a {
