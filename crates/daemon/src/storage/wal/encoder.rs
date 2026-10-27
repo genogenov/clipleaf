@@ -6,7 +6,10 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 use crate::{
     index::Item,
     offer::MAX_FETCHED_TYPES,
-    storage::{Data, PayloadFile, ThumbNail, TypeData, TypeMeta, wal::error::WalError},
+    storage::{
+        Data, PayloadFile, ThumbNail, TypeData, TypeMeta,
+        wal::{error::WalError, wal_writer::WalWriter},
+    },
 };
 
 pub const IDENTIFIER: [u8; 14] = *b"CLIPLEAF WAL\0\0";
@@ -15,7 +18,7 @@ pub const VERSION: u16 = 1;
 // identifier + version + salt + seq_snapshot + checksum;
 pub const HEADER_LEN: usize = size_of_val(&IDENTIFIER) + size_of_val(&VERSION) + 8 + 8 + 8;
 
-pub const MAX_RECORD_LEN: u32 = 256 * 1024;
+pub const MAX_RECORD_LEN: usize = 256 * 1024;
 
 pub const NO_META: u8 = 0;
 pub const META_TYPE_FILELIST: u8 = 1;
@@ -107,99 +110,58 @@ pub fn decode_header(buff: &[u8]) -> Result<Header, WalError> {
 }
 
 /// encoded as len, type, id, seq, time, pinned, entry count, [entry], checksum
-pub fn encode_append(item: &Item, salt: u64, buff: &mut [u8]) -> Result<u32, WalError> {
-    let t: u8 = INSERT_TYPE;
-    let mut offset = 4; // the len
+pub fn encode_append(item: &Item, mut writer: WalWriter, salt: u64) -> Result<usize, WalError> {
+    writer.u8(INSERT_TYPE);
+    writer.u64(item.entry.id);
+    writer.u64(item.seq);
+    writer.u64(item.time_ms);
+    writer.bool(item.pinned);
+    writer.u32(item.entry.types.len() as u32);
 
-    // type
-    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
-    // log_debug!("encode: entry id: {}", item.entry.id);
-    encode_with_size_check(&mut offset, buff, &item.entry.id.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &item.seq.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &item.time_ms.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &[item.pinned as u8])?;
-    encode_with_size_check(
-        &mut offset,
-        buff,
-        &(item.entry.types.len() as u32).to_le_bytes(),
-    )?;
     for typedata in item.entry.types.iter() {
-        encode_stored_type_data(typedata, &mut offset, buff)?;
+        encode_stored_type_data(typedata, &mut writer)?;
     }
 
-    let total_len = offset as u32 + 8;
-    if total_len > MAX_RECORD_LEN {
-        return Err(WalError::Corrupted);
-    }
-
-    encode_len_and_checksum(offset as u32, salt, buff)?;
-
-    Ok(total_len)
+    writer.finish_with_checksum_salt(salt)
 }
 
-pub fn encode_delete(id: u64, salt: u64, buff: &mut [u8]) -> Result<usize, WalError> {
-    let t: u8 = DELETE_TYPE;
-    let mut offset = 4; // the len
-
-    // type
-    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &id.to_le_bytes())?;
-
-    if offset as u32 > MAX_RECORD_LEN {
-        return Err(WalError::Corrupted);
-    }
-
-    encode_len_and_checksum(offset as u32, salt, buff)?;
-    Ok(offset + 8)
+pub fn encode_delete(id: u64, mut writer: WalWriter, salt: u64) -> Result<usize, WalError> {
+    writer.u8(DELETE_TYPE);
+    writer.u64(id);
+    writer.finish_with_checksum_salt(salt)
 }
 
 pub fn encode_touch(
     id: u64,
     seq: u64,
     time_ms: u64,
+    mut writer: WalWriter,
     salt: u64,
-    buff: &mut [u8],
 ) -> Result<usize, WalError> {
-    let t: u8 = TOUCH_TYPE;
-    let mut offset = 4; // the len
-
     // type
-    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &id.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &seq.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &time_ms.to_le_bytes())?;
+    writer.u8(TOUCH_TYPE);
+    writer.u64(id);
+    writer.u64(seq);
+    writer.u64(time_ms);
 
-    if offset as u32 > MAX_RECORD_LEN {
-        return Err(WalError::Corrupted);
-    }
-
-    encode_len_and_checksum(offset as u32, salt, buff)?;
-    Ok(offset + 8)
+    writer.finish_with_checksum_salt(salt)
 }
 
 pub fn encode_thumb(
     id: u64,
     type_index: u32,
     meta: &TypeMeta,
+    mut writer: WalWriter,
     salt: u64,
-    buff: &mut [u8],
 ) -> Result<usize, WalError> {
-    let t: u8 = THUMB_TYPE;
-    let mut offset = 4; // the len
-
     // type
-    encode_with_size_check(&mut offset, buff, &t.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &id.to_le_bytes())?;
-    encode_with_size_check(&mut offset, buff, &type_index.to_le_bytes())?;
+    writer.u8(THUMB_TYPE);
+    writer.u64(id);
+    writer.u32(type_index);
 
-    encode_type_meta(&Some(meta), &mut offset, buff)?;
+    encode_type_meta(&Some(meta), &mut writer)?;
 
-    if offset as u32 > MAX_RECORD_LEN {
-        return Err(WalError::Corrupted);
-    }
-
-    encode_len_and_checksum(offset as u32, salt, buff)?;
-    Ok(offset + 8)
+    writer.finish_with_checksum_salt(salt)
 }
 
 pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
@@ -208,7 +170,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
     // log_debug!("Checking len field.. {}, {}", len, buff.len());
     // len needs to be at least size(u32) + size(u8) for len + type
     let total_len = len.saturating_add(8); // len of record + checksum; 
-    if len < 5 || total_len > MAX_RECORD_LEN || buff.len() < total_len as usize {
+    if len < 5 || total_len > MAX_RECORD_LEN as u32 || buff.len() < total_len as usize {
         return Err(WalError::Corrupted);
     }
 
@@ -309,20 +271,6 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
     }
 }
 
-fn encode_len_and_checksum(len: u32, salt: u64, buff: &mut [u8]) -> Result<(), WalError> {
-    buff[0..4].copy_from_slice(&len.to_le_bytes());
-    // log_debug!(
-    //     "encode: Calculating checksum for {} bytes with salt {}",
-    //     len,
-    //     salt
-    // );
-    let checksum = &xxh3_64_with_seed(&buff[..len as usize], salt);
-    // log_debug!("encode: checksum: {} at offset {}", checksum, len);
-    let mut ofset: usize = len as usize;
-    encode_with_size_check(&mut ofset, buff, &checksum.to_le_bytes())?;
-    Ok(())
-}
-
 fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeData), WalError> {
     let (mime_len, rest) = read_u32(buff)?;
     let (mime, rest) = rest
@@ -413,58 +361,35 @@ fn decode_type_meta(buff: &[u8]) -> Result<(Option<TypeMeta>, &[u8]), WalError> 
 }
 
 /// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes
-fn encode_stored_type_data(
-    t: &TypeData,
-    offset: &mut usize,
-    buff: &mut [u8],
-) -> Result<usize, WalError> {
-    let original = *offset;
+fn encode_stored_type_data(t: &TypeData, writer: &mut WalWriter) -> Result<(), WalError> {
     log_debug!("mime len: {}", t.mime.mime().len());
-    encode_with_size_check(offset, buff, &(t.mime.mime().len() as u32).to_le_bytes())?;
-    encode_with_size_check(offset, buff, t.mime.mime().as_bytes())?;
-    encode_with_size_check(offset, buff, &t.size.to_le_bytes())?;
-    encode_with_size_check(offset, buff, &t.hash.to_le_bytes())?;
+    writer.len32_prefixed(t.mime.mime().as_bytes());
+    writer.u64(t.size);
+    writer.u128(t.hash);
 
     let (has_file, file_seq, head) = match t.data {
-        crate::storage::Data::Inline(ref head) => (0u8, 0_usize, Some(head.clone())),
+        crate::storage::Data::Inline(ref head) => (false, 0_usize, Some(head.clone())),
         crate::storage::Data::File(ref payload_file) => {
-            (1u8, payload_file.seqnum, payload_file.head.clone())
+            (true, payload_file.seqnum, payload_file.head.clone())
         }
     };
+    writer.bool(has_file);
+    writer.u32(file_seq as u32);
 
-    encode_with_size_check(offset, buff, &[has_file])?;
-    encode_with_size_check(offset, buff, &(file_seq as u32).to_le_bytes())?;
-    encode_with_size_check(
-        offset,
-        buff,
-        &head
-            .as_ref()
-            .map_or_default(|h| h.len() as u32)
-            .to_le_bytes(),
-    )?;
+    writer.len32_prefixed(head.as_deref().unwrap_or_default());
 
-    if let Some(head_bytes) = head {
-        encode_with_size_check(offset, buff, &head_bytes)?;
-    }
+    encode_type_meta(&t.meta.as_ref(), writer)?;
 
-    encode_type_meta(&t.meta.as_ref(), offset, buff)?;
-
-    let len = *offset - original;
-
-    Ok(len)
+    Ok(())
 }
 
 /// encoded as type meta byte, type metadata
-pub fn encode_type_meta(
-    meta: &Option<&TypeMeta>,
-    offset: &mut usize,
-    buff: &mut [u8],
-) -> Result<(), WalError> {
+fn encode_type_meta(meta: &Option<&TypeMeta>, writer: &mut WalWriter) -> Result<(), WalError> {
     match meta {
         Some(meta) => match meta {
             TypeMeta::FileList { items } => {
-                encode_with_size_check(offset, buff, &META_TYPE_FILELIST.to_le_bytes())?;
-                encode_with_size_check(offset, buff, &items.to_le_bytes())?;
+                writer.u8(META_TYPE_FILELIST);
+                writer.u32(*items);
             }
             TypeMeta::ThumbNail(maybe_thumb) => match maybe_thumb {
                 Some(thumb) => {
@@ -472,27 +397,22 @@ pub fn encode_type_meta(
                     if len > MAX_THUMB_BYTES {
                         return Err(WalError::Corrupted);
                     }
-                    encode_with_size_check(offset, buff, &META_TYPE_THUMB_PRESENT.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &THUMB_FMT_JPEG.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &thumb.width.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &thumb.height.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &[thumb.has_alpha as u8])?;
-                    encode_with_size_check(offset, buff, &thumb.src_width.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &thumb.src_height.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &thumb.orientation.to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &(thumb.jpeg.len() as u32).to_le_bytes())?;
-                    encode_with_size_check(offset, buff, &thumb.jpeg)?;
+                    writer.u8(META_TYPE_THUMB_PRESENT);
+                    writer.u8(THUMB_FMT_JPEG);
+                    writer.u16(thumb.width);
+                    writer.u16(thumb.height);
+                    writer.bool(thumb.has_alpha);
+                    writer.u32(thumb.src_width);
+                    writer.u32(thumb.src_height);
+                    writer.u8(thumb.orientation);
+                    writer.len32_prefixed(&thumb.jpeg);
                 }
                 None => {
-                    encode_with_size_check(
-                        offset,
-                        buff,
-                        &META_TYPE_THUMB_UNAVAILABLE.to_le_bytes(),
-                    )?;
+                    writer.u8(META_TYPE_THUMB_UNAVAILABLE);
                 }
             },
         },
-        None => encode_with_size_check(offset, buff, &NO_META.to_le_bytes())?,
+        None => writer.u8(NO_META),
     };
 
     Ok(())
@@ -501,24 +421,6 @@ pub fn encode_type_meta(
 pub fn encode_without_size_check(offset: &mut usize, buff: &mut [u8], src: &[u8]) {
     buff[*offset..*offset + src.len()].copy_from_slice(src);
     *offset += src.len();
-}
-
-pub fn encode_with_size_check(
-    offset: &mut usize,
-    buff: &mut [u8],
-    src: &[u8],
-) -> Result<(), WalError> {
-    let slice = &mut buff
-        .get_mut(*offset..*offset + src.len())
-        .ok_or(WalError::SmallEncodeBuffer)?;
-    if slice.len() != src.len() {
-        return Err(WalError::SmallEncodeBuffer);
-    }
-
-    slice.copy_from_slice(src);
-    *offset += src.len();
-
-    Ok(())
 }
 
 fn read_bool(buff: &[u8]) -> Result<(bool, &[u8]), WalError> {

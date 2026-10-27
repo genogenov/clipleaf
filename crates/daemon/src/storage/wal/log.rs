@@ -2,9 +2,8 @@ use std::{
     cmp::{self, max},
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
-    hash::{BuildHasher, Hasher, RandomState},
-    io::{self, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    io::{self, ErrorKind},
+    os::unix::fs::MetadataExt,
     path::Path,
     sync::{
         Arc,
@@ -22,11 +21,11 @@ use crate::{
         Data, Entry, entry,
         wal::{
             encoder::{
-                HEADER_LEN, Header, MAX_RECORD_LEN, RestoreItem, RestoreOp, decode_header,
-                decode_record, encode_append, encode_delete, encode_header, encode_thumb,
-                encode_touch,
+                HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, decode_record, encode_append,
+                encode_delete, encode_thumb, encode_touch,
             },
             error::WalError,
+            wal_file::WalFile,
         },
     },
 };
@@ -58,11 +57,9 @@ pub struct Restored {
 }
 
 pub struct WriteAheadLog {
-    log_file: File,
+    wal_file: WalFile,
     base: Arc<Path>,
     payloads: Arc<Path>,
-    header: Header,
-    last_good_len: u64,
     last_written_without_sync: Option<Instant>,
     logged_failures: i32,
     processing_failures: i32,
@@ -88,61 +85,12 @@ impl WriteAheadLog {
         };
 
         let wal_path = base_dir.join(WAL_FILE_NAME);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .mode(0o600)
-            .open(&wal_path)?;
-
-        let header = {
-            let mut buff = [0u8; HEADER_LEN];
-            match file.read_exact(&mut buff) {
-                Ok(_) => {
-                    log_debug!("Start WAL header decode..");
-                    match decode_header(&buff) {
-                        Ok(h) => Ok(h),
-                        Err(e) => {
-                            log_error!("Error while decoding WAL header: {e}");
-                            match e {
-                                WalError::BadIdentifier
-                                | WalError::UnsupportedVersion(_)
-                                | WalError::SmallEncodeBuffer
-                                | WalError::UnknownType(_) => {
-                                    log_warn!(
-                                        "WAL Error during header parsing, resetting. Error: {e}"
-                                    );
-                                    reset_wal(&mut file)
-                                }
-                                WalError::Corrupted => reset_wal(&mut file),
-                            }
-                        }
-                    }
-                }
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
-                    if let Ok(m) = file.metadata()
-                        && m.size() != 0
-                    {
-                        // skip log if its an empty file => probably first run.
-                        log_warn!("Failed to read WAL file, resetting. Error: {e}");
-                    }
-                    reset_wal(&mut file)
-                }
-                Err(e) => {
-                    log_error!("Failed to read WAL file - exiting.: {e}");
-                    Err(e)
-                }
-            }
-        }?;
-        let pos = file.stream_position()?;
-        let next_min_seq = header.seq_snapshot;
+        let wal_file = WalFile::open_or_create(&wal_path)?;
+        let next_min_seq = wal_file.header().seq_snapshot;
         Ok(Self {
-            // wal_path: wal_path,
-            log_file: file,
+            wal_file,
             base: base_dir,
             payloads,
-            header,
-            last_good_len: pos,
             fail_logging_threshold: 5,
             logged_failures: 0,
             processing_failures: 0,
@@ -157,7 +105,7 @@ impl WriteAheadLog {
     }
 
     pub fn compact_if_necessary(&mut self) -> io::Result<bool> {
-        let dead_bytes = self.last_good_len - HEADER_LEN as u64 - self.live_size;
+        let dead_bytes = self.wal_file.len() - HEADER_LEN as u64 - self.live_size;
         let dead_to_live_ratio = dead_bytes as f32 / self.live_size as f32;
 
         let should_compact = self.has_pending_compact
@@ -175,18 +123,8 @@ impl WriteAheadLog {
 
     fn compact(&mut self) -> io::Result<()> {
         let tmp_wal_path = self.base.join(TMP_WAL_FILE_NAME);
-        match fs::remove_file(&tmp_wal_path) {
-            Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
-            _ => {}
-        };
-        let tmp_file = OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .append(true)
-            .mode(0o600)
-            .open(&tmp_wal_path)?;
 
-        if let Err(e) = self.write_tmp_wal_and_swap(&tmp_wal_path, tmp_file) {
+        if let Err(e) = self.write_tmp_wal_and_swap(&tmp_wal_path) {
             if let Err(re) = fs::remove_file(&tmp_wal_path) {
                 log_warn!("failed to remove {}: {re}", tmp_wal_path.display());
             }
@@ -196,27 +134,20 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    fn write_tmp_wal_and_swap(
-        &mut self,
-        tmp_wal_path: &Path,
-        mut tmp_file: File,
-    ) -> io::Result<()> {
-        let mut header_buff = [0; HEADER_LEN];
-        let mut record_buff = vec![0; MAX_RECORD_LEN as usize];
-        let new_header = encode_new_header(&mut header_buff, self.next_min_seq);
-        let mut writer = BufWriter::with_capacity(1024 * 64, tmp_file);
-        writer.write_all(&header_buff)?;
+    fn write_tmp_wal_and_swap(&mut self, tmp_wal_path: &Path) -> io::Result<()> {
+        let mut new_wal = WalFile::create_or_overwrite(tmp_wal_path, self.next_min_seq)?;
         let mut new_live_map = HashMap::with_capacity(self.live_records.capacity());
         let mut new_live_size: u64 = 0;
+        let flush_threshold = MAX_RECORD_LEN * 2;
         for item in self.live_records.values() {
-            match encode_append(&item.item, new_header.salt, &mut record_buff) {
+            let salt = new_wal.header().salt;
+            match encode_append(&item.item, new_wal.begin_record(), salt) {
                 Ok(len) => {
-                    writer.write_all(&record_buff[..len as usize])?;
                     new_live_map.insert(
                         item.item.entry.id,
                         LogItem {
                             item: item.item.clone(),
-                            size_on_disk: len,
+                            size_on_disk: len as u32,
                         },
                     );
                     new_live_size += len as u64;
@@ -225,19 +156,15 @@ impl WriteAheadLog {
                     log_warn!("Failed to write entry to WAL during compact, skipping: {e}");
                 }
             }
+            new_wal.flush_if_over(flush_threshold)?;
         }
 
-        writer.flush()?;
-        tmp_file = writer.into_inner()?;
-        tmp_file.sync_data()?;
-
-        let new_size = tmp_file.stream_position()?;
+        new_wal.flush()?;
+        new_wal.sync()?;
 
         fs::rename(tmp_wal_path, self.base.join(WAL_FILE_NAME))?;
-        self.log_file = tmp_file;
-        self.header = new_header;
+        self.wal_file = new_wal;
         self.last_written_without_sync = None;
-        self.last_good_len = new_size;
         self.live_records = new_live_map;
         self.live_size = new_live_size;
         self.has_pending_compact = false;
@@ -255,26 +182,25 @@ impl WriteAheadLog {
     pub fn restore(&mut self) -> io::Result<Restored> {
         log_debug!("Begin WAL restore..");
         let mut buff = Vec::new();
-        let bytes = self.log_file.read_to_end(&mut buff)?;
+        let bytes = self.wal_file.read_to_end(&mut buff)?;
         let mut by_id: HashMap<u64, RestoreItem> = HashMap::new();
 
         let mut offset: usize = 0;
         let mut max_seq_seen = 0;
         while offset < bytes {
-            let entry = match decode_record(&buff[offset..], self.header.salt) {
+            let entry = match decode_record(&buff[offset..], self.wal_file.header().salt) {
                 Ok(tuple) => tuple,
                 Err(e) => match e {
                     WalError::BadIdentifier
                     | WalError::UnsupportedVersion(_)
                     | WalError::Corrupted
-                    | WalError::SmallEncodeBuffer => {
+                    | WalError::RecordTooLarge => {
                         let new_len = HEADER_LEN + offset;
                         log_error!(
                             "Failed reading entry. Rewinding to last known good len {}. Error: {e}",
                             new_len
                         );
-                        self.log_file.set_len(new_len as u64)?;
-                        self.log_file.seek(SeekFrom::End(0))?;
+                        self.wal_file.set_position(new_len as u64)?;
                         log_debug!("WAL reverted to len {}", new_len);
                         break;
                     }
@@ -325,7 +251,6 @@ impl WriteAheadLog {
                 }
             }
         }
-        self.last_good_len += offset as u64;
 
         let next_seq = match max_seq_seen.checked_add(1) {
             Some(next) => next,
@@ -333,8 +258,7 @@ impl WriteAheadLog {
                 log_warn!(
                     "history log has an impossible seq ({max_seq_seen}), starting with empty history"
                 );
-                self.header = reset_wal(&mut self.log_file)?;
-                self.last_good_len = HEADER_LEN as u64;
+                self.wal_file.reset()?;
                 by_id.clear();
                 0
             }
@@ -433,7 +357,7 @@ impl WriteAheadLog {
         }
 
         log_debug!("Restored {} entries.", items.len());
-        self.next_min_seq = max(self.header.seq_snapshot, next_seq);
+        self.next_min_seq = max(self.wal_file.header().seq_snapshot, next_seq);
         Ok(Restored {
             items,
             by_key,
@@ -451,15 +375,13 @@ impl WriteAheadLog {
     }
 
     fn run(mut self, rx: Receiver<LogMsg>) {
-        let mut write_buf = vec![0u8; MAX_RECORD_LEN as usize];
-
         if let Err(e) = self.compact_if_necessary() {
             self.handle_processing_result(Err(e));
         }
 
         while let Ok(msg) = self.receive_msg(&rx) {
             log_debug!("Processing WAL msg: {:?}", msg);
-            let res = self.handle_msg(&mut write_buf, msg);
+            let res = self.handle_msg(msg);
             self.handle_processing_result(res);
             if let Err(e) = self.compact_if_necessary() {
                 self.handle_processing_result(Err(e));
@@ -477,7 +399,7 @@ impl WriteAheadLog {
             Err(e) => {
                 self.log_msg_processing_error(e);
                 self.processing_failures += 1;
-                if !self.has_pending_trim && !self.try_trim() {
+                if !self.has_pending_trim && !self.wal_file.try_trim() {
                     self.has_pending_trim = true;
                 }
             }
@@ -532,7 +454,7 @@ impl WriteAheadLog {
     fn sync_state_files(&mut self) {
         let mut should_rearm = false;
 
-        if let Err(e) = self.log_file.sync_data() {
+        if let Err(e) = self.wal_file.sync() {
             self.log_msg_processing_error(e);
             should_rearm = true;
             // if syncdata fails, the kernel might mark the pages clean,
@@ -562,20 +484,31 @@ impl WriteAheadLog {
         OpenOptions::new().read(true).open(&self.base)?.sync_all()
     }
 
-    fn handle_msg(&mut self, write_buf: &mut [u8], msg: LogMsg) -> Result<(), io::Error> {
+    fn handle_pending_trim(&mut self) -> io::Result<()> {
+        if self.has_pending_trim {
+            if self.wal_file.try_trim() {
+                log_info!("Recovered after pending trim");
+                self.has_pending_trim = false;
+            } else {
+                return Err(io::Error::other(
+                    "WAL has a failing pending trim, skipping message.",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_msg(&mut self, msg: LogMsg) -> Result<(), io::Error> {
         match &msg {
-            LogMsg::Append(record) => self.append(record, write_buf),
-            LogMsg::Delete(record) => self.delete(record, write_buf),
-            LogMsg::Touch { id, seq, time_ms } => self.touch(*id, *seq, *time_ms, write_buf),
-            LogMsg::Thumb { item, type_index } => self.thumb(item, *type_index, write_buf),
+            LogMsg::Append(record) => self.append(record),
+            LogMsg::Delete(record) => self.delete(record),
+            LogMsg::Touch { id, seq, time_ms } => self.touch(*id, *seq, *time_ms),
+            LogMsg::Thumb { item, type_index } => self.thumb(item, *type_index),
         }
     }
 
-    fn try_trim(&mut self) -> bool {
-        self.log_file.set_len(self.last_good_len).is_ok()
-    }
-
-    fn append(&mut self, record: &Item, buf: &mut [u8]) -> io::Result<()> {
+    fn append(&mut self, record: &Item) -> io::Result<()> {
         log_debug!(
             "Processing WAL append entry id {}, seq: {}",
             record.entry.id,
@@ -586,7 +519,9 @@ impl WriteAheadLog {
         log_debug!("syncing entry payload files..");
         self.sync_payload_files(record)?;
 
-        let len = encode_append(record, self.header.salt, buf).map_err(io::Error::other)?;
+        let salt = self.wal_file.header().salt;
+        let len =
+            encode_append(record, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
         self.live_records.insert(
             record.entry.id,
             LogItem {
@@ -595,9 +530,9 @@ impl WriteAheadLog {
             },
         );
 
-        self.write_to_log(len as usize, buf)?;
+        self.write_to_log()?;
         if let Some(l) = self.live_records.get_mut(&record.entry.id) {
-            l.size_on_disk = len;
+            l.size_on_disk = len as u32;
         }
         self.live_size += len as u64;
         self.next_min_seq = max(
@@ -608,14 +543,16 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    fn delete(&mut self, entry: &Item, buf: &mut [u8]) -> Result<(), io::Error> {
+    fn delete(&mut self, entry: &Item) -> Result<(), io::Error> {
         log_debug!("Processing WAL delete..");
-        let len = encode_delete(entry.entry.id, self.header.salt, buf).map_err(io::Error::other)?;
+        let salt = self.wal_file.header().salt;
+        let len = encode_delete(entry.entry.id, self.wal_file.begin_record(), salt)
+            .map_err(io::Error::other)?;
 
         let item = self.live_records.remove(&entry.entry.id);
         self.live_size -= item.map_or_default(|i| i.size_on_disk) as u64;
 
-        let res = self.write_to_log(len, buf);
+        let res = self.write_to_log();
 
         log_debug!("Dropping entry files..");
         entry.entry.drop_files();
@@ -624,7 +561,7 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    fn touch(&mut self, id: u64, seq: u64, time_ms: u64, buf: &mut [u8]) -> Result<(), io::Error> {
+    fn touch(&mut self, id: u64, seq: u64, time_ms: u64) -> Result<(), io::Error> {
         let Some(log_item) = self.live_records.get_mut(&id) else {
             log_debug!(
                 "Touch for entry {id} not in the log (its payload sync probably failed), skipped"
@@ -632,24 +569,20 @@ impl WriteAheadLog {
             return Ok(());
         };
 
-        let len =
-            encode_touch(id, seq, time_ms, self.header.salt, buf).map_err(io::Error::other)?;
+        let salt = self.wal_file.header().salt;
+        let len = encode_touch(id, seq, time_ms, self.wal_file.begin_record(), salt)
+            .map_err(io::Error::other)?;
 
         log_item.item.seq = seq;
         log_item.item.time_ms = time_ms;
 
-        self.write_to_log(len, buf)?;
+        self.write_to_log()?;
         self.next_min_seq = max(self.next_min_seq, seq.max(id).saturating_add(1));
         log_debug!("Processed WAL touch - written {} bytes", len);
         Ok(())
     }
 
-    fn thumb(
-        &mut self,
-        item: &Item,
-        type_index: u32,
-        write_buf: &mut [u8],
-    ) -> Result<(), io::Error> {
+    fn thumb(&mut self, item: &Item, type_index: u32) -> Result<(), io::Error> {
         if !self.live_records.contains_key(&item.entry.id) {
             log_debug!("Thumb for entry {} not in the log, skipped", item.entry.id);
             return Ok(());
@@ -672,10 +605,17 @@ impl WriteAheadLog {
             return Ok(());
         };
 
-        let len = encode_thumb(item.entry.id, type_index, meta, self.header.salt, write_buf)
-            .map_err(io::Error::other)?;
+        let salt = self.wal_file.header().salt;
+        let len = encode_thumb(
+            item.entry.id,
+            type_index,
+            meta,
+            self.wal_file.begin_record(),
+            salt,
+        )
+        .map_err(io::Error::other)?;
 
-        self.write_to_log(len, write_buf)?;
+        self.write_to_log()?;
         let Some(log_item) = self.live_records.get_mut(&item.entry.id) else {
             log_debug!("Thumb for entry {} not in the log, skipped", item.entry.id);
             return Ok(());
@@ -687,20 +627,12 @@ impl WriteAheadLog {
         Ok(())
     }
 
-    fn write_to_log(&mut self, len: usize, buf: &mut [u8]) -> Result<(), io::Error> {
-        if self.has_pending_trim {
-            if self.try_trim() {
-                log_info!("Recovered after pending trim");
-                self.has_pending_trim = false;
-            } else {
-                return Err(io::Error::other(
-                    "WAL has a failing pending trim, skipping message.",
-                ));
-            }
+    fn write_to_log(&mut self) -> Result<(), io::Error> {
+        if let Err(e) = self.handle_pending_trim() {
+            self.wal_file.discard_pending_buffer();
+            return Err(e);
         }
-
-        self.log_file.write_all(&buf[..len])?;
-        self.last_good_len += len as u64;
+        self.wal_file.flush()?;
         self.last_written_without_sync
             .get_or_insert_with(Instant::now);
         Ok(())
@@ -715,31 +647,4 @@ impl WriteAheadLog {
         }
         Ok(())
     }
-}
-
-fn random_salt() -> u64 {
-    RandomState::new().build_hasher().finish()
-}
-
-fn reset_wal(file: &mut File) -> io::Result<Header> {
-    file.set_len(0)?;
-    file.rewind()?;
-    write_new_header(file, 1)
-}
-
-fn write_new_header(file: &mut File, seq_snapshot: u64) -> io::Result<Header> {
-    log_debug!("Writing new WAL header..");
-    let mut buff = [0u8; HEADER_LEN];
-    let header = encode_new_header(&mut buff, seq_snapshot);
-    file.write_all(&buff)?;
-    Ok(header)
-}
-
-fn encode_new_header(buf: &mut [u8; HEADER_LEN], seq_snapshot: u64) -> Header {
-    let header = Header {
-        salt: random_salt(),
-        seq_snapshot,
-    };
-    encode_header(&header, buf);
-    header
 }

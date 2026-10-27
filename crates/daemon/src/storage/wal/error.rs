@@ -5,7 +5,7 @@ pub enum WalError {
     BadIdentifier,
     UnsupportedVersion(u16),
     Corrupted,
-    SmallEncodeBuffer,
+    RecordTooLarge,
     UnknownType((u32, u8)),
 }
 
@@ -18,7 +18,7 @@ impl Display for WalError {
             }
             WalError::Corrupted => write!(f, "The Write-Ahead-Log file is corrupted"),
             WalError::UnknownType((_, t)) => write!(f, "An entry with type {t} cannot be parsed"),
-            WalError::SmallEncodeBuffer => write!(f, "Encode buffer too small"),
+            WalError::RecordTooLarge => write!(f, "Provided record too large"),
         }
     }
 }
