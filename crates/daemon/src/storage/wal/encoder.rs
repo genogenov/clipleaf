@@ -1,6 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
-use clipleaf_core::{classify_mime, log_debug, log_error};
+use clipleaf_core::{classify_mime, log_error};
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
 use crate::{
@@ -92,15 +92,15 @@ pub fn decode_header(buff: &[u8]) -> Result<Header, WalError> {
         return Err(WalError::BadIdentifier);
     }
 
+    let (version, rest) = read_u16(&buff[size_of_val(&IDENTIFIER)..])?;
+    if version != VERSION {
+        return Err(WalError::UnsupportedVersion(version));
+    }
+
     let computed_checksum = xxh3_64(&buff[0..HEADER_LEN - 8]);
     let (checksum, _) = read_u64(&buff[HEADER_LEN - 8..])?;
     if computed_checksum != checksum {
         return Err(WalError::Corrupted);
-    }
-
-    let (version, rest) = read_u16(&buff[size_of_val(&IDENTIFIER)..])?;
-    if version != VERSION {
-        return Err(WalError::UnsupportedVersion(version));
     }
 
     let (salt, rest) = read_u64(rest)?;
@@ -164,36 +164,21 @@ pub fn encode_thumb(
     writer.finish_with_checksum_salt(salt)
 }
 
-pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> {
-    let (len, _rest) = read_u32(buff)?;
+pub fn decode_record(
+    buff: &[u8],
+    record_len: u32,
+    total_len: u32,
+    salt: u64,
+) -> Result<RestoreRecord, WalError> {
+    let record_checksum = xxh3_64_with_seed(&buff[..record_len as usize], salt);
+    let (stored_checksum, _) = read_u64(&buff[record_len as usize..total_len as usize])?;
 
-    // log_debug!("Checking len field.. {}, {}", len, buff.len());
-    // len needs to be at least size(u32) + size(u8) for len + type
-    let total_len = len.saturating_add(8); // len of record + checksum; 
-    if len < 5 || total_len > MAX_RECORD_LEN as u32 || buff.len() < total_len as usize {
-        return Err(WalError::Corrupted);
-    }
-
-    // log_debug!(
-    //     "decode: Calculating checksum for {} bytes with salt {}",
-    //     len,
-    //     salt
-    // );
-    let record_checksum = xxh3_64_with_seed(&buff[..len as usize], salt);
-    // log_debug!("Reading checksum at offset: {}", len);
-    let (stored_checksum, _) = read_u64(&buff[len as usize..total_len as usize])?;
-
-    // log_debug!(
-    //     "decode: Record checksum: {}  stored checksum: {}",
-    //     record_checksum,
-    //     stored_checksum
-    // );
     if record_checksum != stored_checksum {
         log_error!("Record checksums do not match.");
         return Err(WalError::Corrupted);
     }
 
-    let rest = &buff[4..len as usize];
+    let rest = &buff[4..record_len as usize];
 
     let (t, rest) = read_u8(rest)?;
 
@@ -214,7 +199,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
             let mut types = Vec::with_capacity(entry_count as usize);
             let mut rest = rest;
             for _ in 0..entry_count {
-                let (_, rest_types, entry) = decode_stored_type_data(rest, id)?;
+                let (_, rest_types, entry) = decode_stored_type_data(rest)?;
                 rest = rest_types;
                 types.push(entry);
             }
@@ -271,7 +256,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
     }
 }
 
-fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeData), WalError> {
+fn decode_stored_type_data(buff: &[u8]) -> Result<(usize, &[u8], TypeData), WalError> {
     let (mime_len, rest) = read_u32(buff)?;
     let (mime, rest) = rest
         .split_at_checked(mime_len as usize)
@@ -291,7 +276,7 @@ fn decode_stored_type_data(buff: &[u8], id: u64) -> Result<(usize, &[u8], TypeDa
         .ok_or(WalError::Corrupted)?;
 
     let data = match has_file {
-        true => Data::File(PayloadFile::restored(id, file_seq as usize, head)),
+        true => Data::File(PayloadFile::restored(file_seq as usize, head)),
         false => Data::Inline(Arc::from(head)),
     };
 
@@ -362,16 +347,13 @@ fn decode_type_meta(buff: &[u8]) -> Result<(Option<TypeMeta>, &[u8]), WalError> 
 
 /// encoded as len(mime), mime, size, hash, has_file, seq, head bytes len, head bytes
 fn encode_stored_type_data(t: &TypeData, writer: &mut RecordWriter) -> Result<(), WalError> {
-    log_debug!("mime len: {}", t.mime.mime().len());
     writer.len32_prefixed(t.mime.mime().as_bytes());
     writer.u64(t.size);
     writer.u128(t.hash);
 
     let (has_file, file_seq, head) = match t.data {
-        crate::storage::Data::Inline(ref head) => (false, 0_usize, Some(head.clone())),
-        crate::storage::Data::File(ref payload_file) => {
-            (true, payload_file.seqnum, payload_file.head.clone())
-        }
+        Data::Inline(ref head) => (false, 0_usize, Some(head.clone())),
+        Data::File(ref payload_file) => (true, payload_file.seqnum, payload_file.head.clone()),
     };
     writer.bool(has_file);
     writer.u32(file_seq as u32);

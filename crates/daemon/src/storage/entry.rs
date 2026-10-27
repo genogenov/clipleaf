@@ -104,7 +104,7 @@ impl EntryBuilder {
             file: None,
             hasher: Xxh3::new(),
             head: Some(Vec::with_capacity(MAX_INLINE_TYPE_BYTES)),
-            file_id: self.entry.id,
+            entry_id: self.entry.id,
             file_seqnum: seqnum,
             file_path_base: self.entry.payloads_dir.clone(),
             mime: Some(mime),
@@ -152,7 +152,7 @@ impl Entry {
     pub fn drop_files(&self) {
         for t in self.types.iter().chain(self.pending_types.iter().flatten()) {
             if let Data::File(f) = &t.data
-                && let Err(e) = fs::remove_file(f.payload_path(&self.payloads_dir))
+                && let Err(e) = fs::remove_file(f.payload_path(&self.payloads_dir, self.id))
             {
                 log_error!("Could not delete file on etry drop: {}", e);
             }

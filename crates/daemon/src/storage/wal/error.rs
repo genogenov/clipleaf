@@ -7,7 +7,7 @@ pub enum WalError {
     Corrupted,
     RecordTooLarge,
     UnknownType((u32, u8)),
-    IoError(io::Error),
+    Io(io::Error),
 }
 
 impl Display for WalError {
@@ -20,7 +20,7 @@ impl Display for WalError {
             WalError::Corrupted => write!(f, "The Write-Ahead-Log file is corrupted"),
             WalError::UnknownType((_, t)) => write!(f, "An entry with type {t} cannot be parsed"),
             WalError::RecordTooLarge => write!(f, "Provided record too large"),
-            WalError::IoError(error) => write!(f, "An I/O error occurred: {error}"),
+            WalError::Io(error) => write!(f, "An I/O error occurred: {error}"),
         }
     }
 }

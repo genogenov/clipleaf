@@ -207,14 +207,12 @@ impl WriteAheadLog {
                         log_warn!("Encountered unknown entry type {t} - skipping.");
                         continue;
                     }
-                    WalError::IoError(error) => {
+                    WalError::Io(error) => {
                         log_error!("Failed reading entry with I/O error: {error}. Skipping rest.",);
                         break;
                     }
                 },
             };
-
-            log_debug!("restore entry: {:?}", entry.op);
 
             match entry.op {
                 RestoreOp::Insert(item) => {
@@ -291,7 +289,7 @@ impl WriteAheadLog {
                 entry::Data::File(p) => Some((p, t)),
                 _ => None,
             }) {
-                let path = file_type.payload_path(&self.payloads);
+                let path = file_type.payload_path(&self.payloads, val.id);
                 match fs::metadata(&path) {
                     Ok(metadata) if metadata.size() != tdata.size => {
                         log_warn!(
@@ -368,7 +366,6 @@ impl WriteAheadLog {
                 },
             );
             self.live_size += item.size_on_disk as u64;
-            log_debug!("live size : {}", self.live_size);
             items.push(history_item);
         }
 
@@ -659,7 +656,7 @@ impl WriteAheadLog {
             Data::File(ref f) => Some(f),
             _ => None,
         }) {
-            File::open(f.payload_path(&self.payloads))?.sync_data()?
+            File::open(f.payload_path(&self.payloads, record.entry.id))?.sync_data()?
         }
         Ok(())
     }

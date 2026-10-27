@@ -54,17 +54,8 @@ impl WalFile {
         let header_buf = &mut [0; HEADER_LEN];
         encode_header(&header, header_buf);
         file.write_all(header_buf)?;
-        let pos = file.stream_position()?;
 
-        Ok(Self {
-            file,
-            len: pos,
-            header,
-            write_buff: WriteBuffer {
-                buff: Vec::with_capacity(MAX_RECORD_LEN),
-                pos: 0,
-            },
-        })
+        Ok(Self::new(file, header, HEADER_LEN as u64))
     }
 
     pub fn open_or_create(path: &Path, max_alloc: usize) -> io::Result<WalReader> {
@@ -88,7 +79,7 @@ impl WalFile {
                                 WalError::BadIdentifier
                                 | WalError::UnsupportedVersion(_)
                                 | WalError::RecordTooLarge
-                                | WalError::IoError(_)
+                                | WalError::Io(_)
                                 | WalError::UnknownType(_) => {
                                     log_warn!(
                                         "WAL Error during header parsing, resetting. Error: {e}"

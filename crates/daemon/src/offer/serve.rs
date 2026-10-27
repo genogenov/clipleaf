@@ -65,7 +65,7 @@ fn serve(job: ServeJob) -> io::Result<()> {
     match &t.data {
         Data::Inline(bytes) => serve_bytes_nonblocking(job.fd, bytes, SERVE_STALL),
         Data::File(f) => {
-            let path = f.payload_path(&job.entry.payloads_dir);
+            let path = f.payload_path(&job.entry.payloads_dir, job.entry.id);
             let file = match File::open(&path) {
                 Ok(f) => f,
                 Err(e) if e.kind() == ErrorKind::NotFound => {

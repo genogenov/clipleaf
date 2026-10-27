@@ -66,7 +66,8 @@ impl WalReader {
                     return Some(Err(WalError::Corrupted));
                 }
                 if available.len() >= total {
-                    let rec = decode_record(&available[..total], self.header.salt);
+                    let rec =
+                        decode_record(&available[..total], len, total as u32, self.header.salt);
                     self.start += total;
                     if rec.is_ok() || matches!(rec, Err(WalError::UnknownType(_))) {
                         self.offset += total as u64;
@@ -95,7 +96,7 @@ impl WalReader {
                 Err(e) if e.kind() == ErrorKind::Interrupted => {}
                 Err(e) => {
                     self.done = true;
-                    return Some(Err(WalError::IoError(e)));
+                    return Some(Err(WalError::Io(e)));
                 }
             }
         }

@@ -192,7 +192,7 @@ impl Index {
                 source: match t_img.data {
                     Data::Inline(ref items) => ImageSource::Inline(items.clone()),
                     Data::File(ref payload_file) => {
-                        ImageSource::File(payload_file.payload_path(&self.payload_dir))
+                        ImageSource::File(payload_file.payload_path(&self.payload_dir, entry.id))
                     }
                 },
             })

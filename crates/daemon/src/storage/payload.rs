@@ -17,13 +17,12 @@ use crate::storage::{Data, EntryBuilder, MAX_INLINE_TYPE_BYTES, TypeData, TypeMe
 pub struct PayloadFile {
     pub(super) head: Option<Arc<[u8]>>,
     pub(super) seqnum: usize,
-    pub(super) id: u64,
 }
 
 pub struct PayloadWriter {
     pub(super) file_path_base: Arc<Path>,
     pub(super) mime: Option<Mime<Cow<'static, str>>>,
-    pub(super) file_id: u64,
+    pub(super) entry_id: u64,
     pub(super) file_seqnum: usize,
     pub(super) size: u64,
     pub(super) head: Option<Vec<u8>>,
@@ -47,12 +46,15 @@ impl PayloadWriter {
                 None => {
                     let result = self.file.insert(PayloadFile::create_write(
                         &self.file_path_base,
-                        self.file_id,
+                        self.entry_id,
                         self.file_seqnum,
                     )?);
                     log_debug!(
                         "Created payload file at {}",
-                        result.0.payload_path(&self.file_path_base).display()
+                        result
+                            .0
+                            .payload_path(&self.file_path_base, self.entry_id)
+                            .display()
                     );
                     result.1.write_all(head)?;
                     result
@@ -109,7 +111,7 @@ impl Drop for PayloadWriter {
     fn drop(&mut self) {
         if let Some((payload, _file)) = self.file.take() {
             // still here means not finished
-            let path = payload.payload_path(&self.file_path_base);
+            let path = payload.payload_path(&self.file_path_base, self.entry_id);
             log_debug!("Dropping unfinished file at {}", path.display());
             if let Err(e) = fs::remove_file(&path) {
                 log_error!("…: {e}");
@@ -119,40 +121,35 @@ impl Drop for PayloadWriter {
 }
 
 impl PayloadFile {
-    pub fn restored(id: u64, seqnum: usize, maybe_head: &[u8]) -> Self {
+    pub fn restored(seqnum: usize, maybe_head: &[u8]) -> Self {
         let head = match maybe_head.len() {
             0 => None,
             _ => Some(Arc::from(maybe_head)),
         };
 
-        Self { head, seqnum, id }
+        Self { head, seqnum }
     }
 
-    pub fn payload_path(&self, payload_dir: &Path) -> PathBuf {
-        payload_dir.join(format!("{}.{}", self.id, self.seqnum))
+    pub fn payload_path(&self, payload_dir: &Path, entry_id: u64) -> PathBuf {
+        payload_dir.join(format!("{}.{}", entry_id, self.seqnum))
     }
 
-    pub fn create_write(dir: &Path, id: u64, seqnum: usize) -> io::Result<(Self, File)> {
-        let paylad = Self {
-            head: None,
-            seqnum,
-            id,
-        };
+    pub fn create_write(dir: &Path, entry_id: u64, seqnum: usize) -> io::Result<(Self, File)> {
+        let payload = Self { head: None, seqnum };
 
         let file = OpenOptions::new()
             .mode(0o600)
             .write(true)
             .create_new(true)
-            .open(paylad.payload_path(dir))?;
+            .open(payload.payload_path(dir, entry_id))?;
 
-        Ok((paylad, file))
+        Ok((payload, file))
     }
 }
 
 impl Debug for PayloadFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PayloadFile")
-            .field("id", &self.id)
             .field("seqnum", &self.seqnum)
             .field("head", &self.head.as_ref().map(|h| h.len()))
             .finish()
