@@ -40,19 +40,9 @@ pub struct RestoreRecord {
 #[derive(Debug)]
 pub enum RestoreOp {
     Insert(RestoreItem),
-    Delete {
-        id: u64,
-    },
-    Touch {
-        id: u64,
-        seq: u64,
-        time_ms: u64,
-    },
-    Thumb {
-        id: u64,
-        type_index: u32,
-        meta: TypeMeta,
-    },
+    Delete { id: u64 },
+    Touch { id: u64, seq: u64, time_ms: u64 },
+    Thumb { id: u64, type_index: u32, meta: TypeMeta },
 }
 
 #[derive(Debug)]
@@ -131,13 +121,7 @@ pub fn encode_delete(id: u64, mut writer: RecordWriter, salt: u64) -> Result<usi
     writer.finish_with_checksum_salt(salt)
 }
 
-pub fn encode_touch(
-    id: u64,
-    seq: u64,
-    time_ms: u64,
-    mut writer: RecordWriter,
-    salt: u64,
-) -> Result<usize, WalError> {
+pub fn encode_touch(id: u64, seq: u64, time_ms: u64, mut writer: RecordWriter, salt: u64) -> Result<usize, WalError> {
     // type
     writer.u8(TOUCH_TYPE);
     writer.u64(id);
@@ -147,13 +131,7 @@ pub fn encode_touch(
     writer.finish_with_checksum_salt(salt)
 }
 
-pub fn encode_thumb(
-    id: u64,
-    type_index: u32,
-    meta: &TypeMeta,
-    mut writer: RecordWriter,
-    salt: u64,
-) -> Result<usize, WalError> {
+pub fn encode_thumb(id: u64, type_index: u32, meta: &TypeMeta, mut writer: RecordWriter, salt: u64) -> Result<usize, WalError> {
     // type
     writer.u8(THUMB_TYPE);
     writer.u64(id);
@@ -172,12 +150,8 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
         return Err(WalError::Corrupted);
     }
 
-    let record_checksum =
-        xxh3_64_with_seed(buff.get(..len as usize).ok_or(WalError::Corrupted)?, salt);
-    let (stored_checksum, _) = read_u64(
-        buff.get(len as usize..total_len as usize)
-            .ok_or(WalError::Corrupted)?,
-    )?;
+    let record_checksum = xxh3_64_with_seed(buff.get(..len as usize).ok_or(WalError::Corrupted)?, salt);
+    let (stored_checksum, _) = read_u64(buff.get(len as usize..total_len as usize).ok_or(WalError::Corrupted)?)?;
 
     if record_checksum != stored_checksum {
         log_error!("Record checksums do not match.");
@@ -250,11 +224,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
 
             Ok(RestoreRecord {
                 size_on_disk: total_len,
-                op: RestoreOp::Thumb {
-                    id,
-                    type_index,
-                    meta,
-                },
+                op: RestoreOp::Thumb { id, type_index, meta },
             })
         }
         t => Err(WalError::UnknownType((total_len, t))),
@@ -263,9 +233,7 @@ pub fn decode_record(buff: &[u8], salt: u64) -> Result<RestoreRecord, WalError> 
 
 fn decode_stored_type_data(buff: &[u8]) -> Result<(usize, &[u8], TypeData), WalError> {
     let (mime_len, rest) = read_u32(buff)?;
-    let (mime, rest) = rest
-        .split_at_checked(mime_len as usize)
-        .ok_or(WalError::Corrupted)?;
+    let (mime, rest) = rest.split_at_checked(mime_len as usize).ok_or(WalError::Corrupted)?;
     let mime = Cow::from(String::from_utf8(mime.to_vec()).map_err(|e| {
         log_error!("Failed to decode mime string: {e}");
         WalError::Corrupted
@@ -276,9 +244,7 @@ fn decode_stored_type_data(buff: &[u8]) -> Result<(usize, &[u8], TypeData), WalE
     let (has_file, rest) = read_bool(rest)?;
     let (file_seq, rest) = read_u32(rest)?;
     let (head_len, rest) = read_u32(rest)?;
-    let (head, rest) = rest
-        .split_at_checked(head_len as usize)
-        .ok_or(WalError::Corrupted)?;
+    let (head, rest) = rest.split_at_checked(head_len as usize).ok_or(WalError::Corrupted)?;
 
     let data = match has_file {
         true => Data::File(PayloadFile::restored(file_seq as usize, head)),
@@ -326,9 +292,7 @@ fn decode_type_meta(buff: &[u8]) -> Result<(Option<TypeMeta>, &[u8]), WalError> 
                 return Err(WalError::Corrupted);
             }
 
-            let (jpeg, rest) = rest
-                .split_at_checked(jpeg_len as usize)
-                .ok_or(WalError::Corrupted)?;
+            let (jpeg, rest) = rest.split_at_checked(jpeg_len as usize).ok_or(WalError::Corrupted)?;
 
             (
                 Some(TypeMeta::ThumbNail(Some(Arc::from(ThumbNail {

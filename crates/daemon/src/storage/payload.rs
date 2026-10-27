@@ -44,17 +44,12 @@ impl PayloadWriter {
             let file = match &mut self.file {
                 Some(f) => f,
                 None => {
-                    let result = self.file.insert(PayloadFile::create_write(
-                        &self.file_path_base,
-                        self.entry_id,
-                        self.file_seqnum,
-                    )?);
+                    let result = self
+                        .file
+                        .insert(PayloadFile::create_write(&self.file_path_base, self.entry_id, self.file_seqnum)?);
                     log_debug!(
                         "Created payload file at {}",
-                        result
-                            .0
-                            .payload_path(&self.file_path_base, self.entry_id)
-                            .display()
+                        result.0.payload_path(&self.file_path_base, self.entry_id).display()
                     );
                     result.1.write_all(head)?;
                     result
@@ -76,9 +71,7 @@ impl PayloadWriter {
     pub fn finish(mut self, builder: &mut EntryBuilder) {
         let mime = self.mime.take().unwrap();
         let needs_head = match mime.kind() {
-            MimeKind::FileList | MimeKind::Text | MimeKind::TextExtended | MimeKind::TextLike => {
-                true
-            }
+            MimeKind::FileList | MimeKind::Text | MimeKind::TextExtended | MimeKind::TextLike => true,
             MimeKind::Image => false,
             MimeKind::Other => false,
             MimeKind::Password => false,
@@ -97,10 +90,7 @@ impl PayloadWriter {
                     Data::File(f.0)
                 }
             },
-            meta: self
-                .filescan
-                .take()
-                .map(|s| TypeMeta::FileList { items: s.finish() }),
+            meta: self.filescan.take().map(|s| TypeMeta::FileList { items: s.finish() }),
         };
 
         builder.entry.pending_types[self.file_seqnum] = Some(data);

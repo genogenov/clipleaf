@@ -36,16 +36,11 @@ fn an_event_split_across_would_block_is_delivered_once_complete() {
         assert!(
             matches!(
                 rig.session.try_next_event().unwrap(),
-                Some(WlSessionEvent::Selection {
-                    offer_id: Some(OFFER_A)
-                })
+                Some(WlSessionEvent::Selection { offer_id: Some(OFFER_A) })
             ),
             "cut {cut}"
         );
-        assert_eq!(
-            rig.session.get_offer().unwrap().offered_mime_types(),
-            ["text/plain"]
-        );
+        assert_eq!(rig.session.get_offer().unwrap().offered_mime_types(), ["text/plain"]);
     }
 }
 
@@ -54,9 +49,7 @@ fn messages_straddling_the_end_of_the_read_buffer_are_all_delivered_intact() {
     // 8-byte cancelled + 12-byte selection(none) = 20 bytes per pair; 20 does not divide the
     // 4096-byte buffer, so reads end mid-message over and over.
     let mut rig = rig();
-    let sources: Vec<u32> = (0..3)
-        .map(|_| rig.session.create_data_source().unwrap().local_id)
-        .collect();
+    let sources: Vec<u32> = (0..3).map(|_| rig.session.create_data_source().unwrap().local_id).collect();
     rig.flush_and_drain();
     let pairs = 500usize;
     let mut bytes = Vec::new();
@@ -91,10 +84,7 @@ fn a_partial_message_at_the_very_end_of_a_full_buffer_waits_for_the_rest() {
 
     assert_eq!(drain_events(&mut rig.session).len(), whole);
     rig.peer().send(&last[4..]);
-    assert_eq!(
-        kinds(&drain_events(&mut rig.session)),
-        [("cancelled", Some(source))]
-    );
+    assert_eq!(kinds(&drain_events(&mut rig.session)), [("cancelled", Some(source))]);
 }
 
 #[test]
@@ -102,11 +92,7 @@ fn messages_already_buffered_are_handled_by_the_next_call() {
     let mut rig = rig();
     // `done` and `delete_id` arrive in the same read.
     let mut events = done(CALLBACK);
-    events.extend(wire::msg(
-        DISPLAY,
-        DISPLAY_DELETE_ID,
-        &CALLBACK.to_ne_bytes(),
-    ));
+    events.extend(wire::msg(DISPLAY, DISPLAY_DELETE_ID, &CALLBACK.to_ne_bytes()));
     rig.peer().send(&events);
 
     assert!(matches!(
@@ -161,10 +147,7 @@ fn eof_in_the_middle_of_a_message_is_a_different_unexpected_eof() {
                 rig.session.try_next_event().unwrap_err()
             };
             assert_eq!(err.kind(), ErrorKind::UnexpectedEof, "cut {cut}: {err}");
-            assert!(
-                err.to_string().contains("partial message"),
-                "cut {cut}: {err}"
-            );
+            assert!(err.to_string().contains("partial message"), "cut {cut}: {err}");
         }
     }
 }

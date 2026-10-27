@@ -5,10 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use clipleaf_core::{
-    MimeKind, WlDataControlOffer, WlDataControlSource, WlSessionManager,
-    mime_types::TEXT_MIME_TYPES,
-};
+use clipleaf_core::{MimeKind, WlDataControlOffer, WlDataControlSource, WlSessionManager, mime_types::TEXT_MIME_TYPES};
 
 use crate::{offer::serve::ServeJob, storage::Entry};
 
@@ -37,10 +34,7 @@ pub struct DataOwner {
 impl DataOwner {
     pub fn new() -> Self {
         Self {
-            marker: format!(
-                "x-clipleaf/{:08x}",
-                RandomState::new().build_hasher().finish() as u32
-            ),
+            marker: format!("x-clipleaf/{:08x}", RandomState::new().build_hasher().finish() as u32),
             clipboard: None,
             primary: None,
         }
@@ -50,12 +44,7 @@ impl DataOwner {
         offer.offered_mime_types().iter().any(|t| *t == self.marker)
     }
 
-    pub fn restore(
-        &mut self,
-        s: &mut WlSessionManager,
-        entry: Arc<Entry>,
-        primary: bool,
-    ) -> io::Result<()> {
+    pub fn restore(&mut self, s: &mut WlSessionManager, entry: Arc<Entry>, primary: bool) -> io::Result<()> {
         let source = s.create_data_source()?;
 
         let res = {
@@ -97,29 +86,18 @@ impl DataOwner {
             return Err(e);
         }
 
-        let slot = if primary {
-            &mut self.primary
-        } else {
-            &mut self.clipboard
-        };
+        let slot = if primary { &mut self.primary } else { &mut self.clipboard };
         if let Some(old) = slot.replace(OwnSource { source, entry }) {
             s.destroy_source(old.source)?;
         }
         Ok(())
     }
 
-    pub fn on_cancelled(
-        &mut self,
-        s: &mut WlSessionManager,
-        local_source_id: u32,
-    ) -> io::Result<()> {
+    pub fn on_cancelled(&mut self, s: &mut WlSessionManager, local_source_id: u32) -> io::Result<()> {
         let Some(source) = self
             .clipboard
             .take_if(|x| x.source.local_id == local_source_id)
-            .or_else(|| {
-                self.primary
-                    .take_if(|x| x.source.local_id == local_source_id)
-            })
+            .or_else(|| self.primary.take_if(|x| x.source.local_id == local_source_id))
         else {
             return Ok(());
         };
@@ -140,9 +118,7 @@ impl DataOwner {
         }
         let (source, is_primary) = source?;
         let idx = source.entry.types.iter().position(|x| {
-            x.mime.mime().as_bytes() == mime
-                || (x.mime.kind() == MimeKind::Text
-                    && TEXT_MIME_TYPES.iter().any(|a| a.as_bytes() == mime))
+            x.mime.mime().as_bytes() == mime || (x.mime.kind() == MimeKind::Text && TEXT_MIME_TYPES.iter().any(|a| a.as_bytes() == mime))
         })?;
 
         Some(ServeJob {

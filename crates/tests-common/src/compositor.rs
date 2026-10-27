@@ -45,10 +45,7 @@ pub(crate) mod relay {
         /// That client's socket closed (all its processes exited or closed it).
         ClientDisconnected(u32),
         /// The (primary) selection changed; `None` = cleared.
-        Selection {
-            primary: bool,
-            mimes: Option<Vec<String>>,
-        },
+        Selection { primary: bool, mimes: Option<Vec<String>> },
         /// `cancelled` was sent to a replaced source.
         Cancelled { primary: bool },
         /// A `receive` was forwarded to the owning source as `send`.
@@ -102,20 +99,12 @@ pub(crate) mod relay {
         }
 
         fn slot(&mut self, primary: bool) -> &mut Option<Selection> {
-            if primary {
-                &mut self.primary
-            } else {
-                &mut self.selection
-            }
+            if primary { &mut self.primary } else { &mut self.selection }
         }
 
         /// data_offer + offer* + (primary_)selection to one device.
         fn advertise(&self, device: &ExtDataControlDeviceV1, primary: bool) {
-            let current = if primary {
-                &self.primary
-            } else {
-                &self.selection
-            };
+            let current = if primary { &self.primary } else { &self.selection };
             let offer = current.as_ref().and_then(|sel| {
                 let client = device.client()?;
                 let offer = client
@@ -135,11 +124,7 @@ pub(crate) mod relay {
                 Some(offer)
             });
             if let Some(held) = device.data::<DeviceData>() {
-                let slot = if primary {
-                    &held.primary
-                } else {
-                    &held.selection
-                };
+                let slot = if primary { &held.primary } else { &held.selection };
                 let previous = std::mem::replace(&mut *slot.lock().unwrap(), offer.clone());
                 if let Some(data) = previous.as_ref().and_then(|p| p.data::<OfferData>()) {
                     data.inert.store(true, Ordering::Relaxed);
@@ -168,14 +153,7 @@ pub(crate) mod relay {
     }
 
     impl GlobalDispatch<WlSeat, ()> for State {
-        fn bind(
-            _: &mut Self,
-            _: &DisplayHandle,
-            _: &Client,
-            resource: New<WlSeat>,
-            _: &(),
-            data_init: &mut DataInit<'_, Self>,
-        ) {
+        fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<WlSeat>, _: &(), data_init: &mut DataInit<'_, Self>) {
             let seat = data_init.init(resource, ());
             seat.capabilities(wl_seat::Capability::empty());
             if seat.version() >= 2 {
@@ -185,28 +163,13 @@ pub(crate) mod relay {
     }
 
     impl Dispatch<WlSeat, ()> for State {
-        fn request(
-            _: &mut Self,
-            _: &Client,
-            _: &WlSeat,
-            _: wl_seat::Request,
-            _: &(),
-            _: &DisplayHandle,
-            _: &mut DataInit<'_, Self>,
-        ) {
+        fn request(_: &mut Self, _: &Client, _: &WlSeat, _: wl_seat::Request, _: &(), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
             // get_pointer/keyboard/touch are never used by clipleaf; release is a destructor.
         }
     }
 
     impl GlobalDispatch<ExtDataControlManagerV1, ()> for State {
-        fn bind(
-            _: &mut Self,
-            _: &DisplayHandle,
-            _: &Client,
-            resource: New<ExtDataControlManagerV1>,
-            _: &(),
-            data_init: &mut DataInit<'_, Self>,
-        ) {
+        fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ExtDataControlManagerV1>, _: &(), data_init: &mut DataInit<'_, Self>) {
             data_init.init(resource, ());
         }
     }
@@ -262,10 +225,7 @@ pub(crate) mod relay {
                     let data = source.data::<Mutex<SourceData>>().expect("source data");
                     let mut data = data.lock().unwrap();
                     if data.used {
-                        device.post_error(
-                            ext_data_control_device_v1::Error::UsedSource,
-                            "source already used",
-                        );
+                        device.post_error(ext_data_control_device_v1::Error::UsedSource, "source already used");
                         return;
                     }
                     data.used = true;
@@ -291,39 +251,24 @@ pub(crate) mod relay {
             if let ext_data_control_source_v1::Request::Offer { mime_type } = request {
                 let mut data = data.lock().unwrap();
                 if data.used {
-                    source.post_error(
-                        ext_data_control_source_v1::Error::InvalidOffer,
-                        "offer after set_selection",
-                    );
+                    source.post_error(ext_data_control_source_v1::Error::InvalidOffer, "offer after set_selection");
                     return;
                 }
                 data.mimes.push(mime_type);
             }
         }
 
-        fn destroyed(
-            state: &mut Self,
-            _: ClientId,
-            source: &ExtDataControlSourceV1,
-            _: &Mutex<SourceData>,
-        ) {
+        fn destroyed(state: &mut Self, _: ClientId, source: &ExtDataControlSourceV1, _: &Mutex<SourceData>) {
             // A destroyed (or disconnected) selection owner clears the selection,
             // as wlroots does. No `cancelled`: the object is gone.
             for primary in [false, true] {
-                if state
-                    .slot(primary)
-                    .as_ref()
-                    .is_some_and(|s| &s.source == source)
-                {
+                if state.slot(primary).as_ref().is_some_and(|s| &s.source == source) {
                     *state.slot(primary) = None;
                     state.devices.retain(|d| d.is_alive());
                     for device in &state.devices {
                         state.advertise(device, primary);
                     }
-                    let _ = state.notes.send(Note::Selection {
-                        primary,
-                        mimes: None,
-                    });
+                    let _ = state.notes.send(Note::Selection { primary, mimes: None });
                 }
             }
         }
@@ -365,11 +310,7 @@ struct ClientState {
 }
 
 impl wayland_server::backend::ClientData for ClientState {
-    fn disconnected(
-        &self,
-        _: wayland_server::backend::ClientId,
-        _: wayland_server::backend::DisconnectReason,
-    ) {
+    fn disconnected(&self, _: wayland_server::backend::ClientId, _: wayland_server::backend::DisconnectReason) {
         let _ = self.notes.send(Note::ClientDisconnected(self.n));
     }
 }
@@ -427,8 +368,7 @@ impl TestCompositor {
             }
         };
         let display_name = "wayland-test".to_owned();
-        let listener = ListeningSocket::bind_absolute(runtime_dir.join(&display_name))
-            .map_err(io::Error::other)?;
+        let listener = ListeningSocket::bind_absolute(runtime_dir.join(&display_name)).map_err(io::Error::other)?;
 
         let (tx, rx) = mpsc::channel();
         let (stop_rx, stop_tx) = io::pipe()?;
@@ -475,9 +415,7 @@ impl TestCompositor {
 
     /// Blocks until a (primary) selection with types is set; returns the types.
     pub fn wait_selection(&self, primary: bool) -> Vec<String> {
-        match self.wait_for(
-            |n| matches!(n, Note::Selection { primary: p, mimes: Some(_) } if *p == primary),
-        ) {
+        match self.wait_for(|n| matches!(n, Note::Selection { primary: p, mimes: Some(_) } if *p == primary)) {
             Note::Selection { mimes, .. } => mimes.unwrap_or_default(),
             _ => unreachable!(),
         }
@@ -485,9 +423,7 @@ impl TestCompositor {
 
     /// Blocks until the (primary) selection is cleared.
     pub fn wait_cleared(&self, primary: bool) {
-        self.wait_for(
-            |n| matches!(n, Note::Selection { primary: p, mimes: None } if *p == primary),
-        );
+        self.wait_for(|n| matches!(n, Note::Selection { primary: p, mimes: None } if *p == primary));
     }
 }
 
@@ -509,19 +445,17 @@ impl Drop for TestCompositor {
     }
 }
 
-fn run(
-    listener: ListeningSocket,
-    tx: Sender<Note>,
-    stop: io::PipeReader,
-    config: Config,
-) -> io::Result<()> {
+fn run(listener: ListeningSocket, tx: Sender<Note>, stop: io::PipeReader, config: Config) -> io::Result<()> {
     let mut display: Display<relay::State> = Display::new().map_err(io::Error::other)?;
     let mut dh = display.handle();
     if config.seat {
         dh.create_global::<relay::State, wayland_server::protocol::wl_seat::WlSeat, ()>(9, ());
     }
     if config.data_control {
-        dh.create_global::<relay::State, wayland_protocols::ext::data_control::v1::server::ext_data_control_manager_v1::ExtDataControlManagerV1, ()>(1, ());
+        dh.create_global::<relay::State, wayland_protocols::ext::data_control::v1::server::ext_data_control_manager_v1::ExtDataControlManagerV1, ()>(
+            1,
+            (),
+        );
     }
     let mut state = relay::State::new(dh.clone(), tx);
     let mut clients = 0;

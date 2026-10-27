@@ -37,12 +37,8 @@ impl WlDisplay {
         None
     }
 
-    pub fn get_registry(
-        writer: WlMessageWriter,
-        router: &mut WlMessageRouter,
-    ) -> std::io::Result<WlRegistry> {
-        let mut msg =
-            writer.begin_message::<WlDisplay>(DisplayOps::GetRegistry, WlDisplay::TYPE_ID)?;
+    pub fn get_registry(writer: WlMessageWriter, router: &mut WlMessageRouter) -> std::io::Result<WlRegistry> {
+        let mut msg = writer.begin_message::<WlDisplay>(DisplayOps::GetRegistry, WlDisplay::TYPE_ID)?;
         let id = router.register_client(WlInterface::Registry)?;
         msg.pack_new_object_id(&id)?;
         msg.end()?;
@@ -50,10 +46,7 @@ impl WlDisplay {
         Ok(WlRegistry::new(id.commit()))
     }
 
-    pub fn schedule_sync(
-        writer: WlMessageWriter,
-        router: &mut WlMessageRouter,
-    ) -> std::io::Result<u32> {
+    pub fn schedule_sync(writer: WlMessageWriter, router: &mut WlMessageRouter) -> std::io::Result<u32> {
         let mut msg = writer.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID)?;
         let callback_id = router.register_client(WlInterface::Callback)?;
         msg.pack_new_object_id(&callback_id)?;

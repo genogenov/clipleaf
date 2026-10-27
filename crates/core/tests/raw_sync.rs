@@ -27,13 +27,7 @@ fn two_syncs_in_flight_each_report_their_own_callback_in_order() {
 
     // Each `done` names its own callback, so a waiter for the second sync can tell the first one's
     // `done` from its own. Exactly two reads: a wrong id fails here instead of waiting forever.
-    let seen = [
-        rig.session.next_event().unwrap(),
-        rig.session.next_event().unwrap(),
-    ];
-    assert_eq!(
-        kinds(&seen),
-        [("sync", Some(first)), ("sync", Some(second))]
-    );
+    let seen = [rig.session.next_event().unwrap(), rig.session.next_event().unwrap()];
+    assert_eq!(kinds(&seen), [("sync", Some(first)), ("sync", Some(second))]);
     assert!(rig.session.try_next_event().unwrap().is_none());
 }

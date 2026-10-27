@@ -29,9 +29,7 @@ impl Payload {
 pub fn store(input: &mut File, temp_dir: &Path) -> io::Result<Payload> {
     // Try and see if we can fit in memory within the MAX_INLINE_BYTES limit.
     let mut head = Vec::new();
-    input
-        .take(MAX_INLINE_BYTES as u64 + 1)
-        .read_to_end(&mut head)?;
+    input.take(MAX_INLINE_BYTES as u64 + 1).read_to_end(&mut head)?;
 
     let head_len = head.len();
 
@@ -52,18 +50,9 @@ pub fn store(input: &mut File, temp_dir: &Path) -> io::Result<Payload> {
 }
 
 fn open_tmpfile(dir: &Path) -> io::Result<File> {
-    match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .mode(0o600)
-        .custom_flags(O_TMPFILE)
-        .open(dir)
-    {
+    match OpenOptions::new().read(true).write(true).mode(0o600).custom_flags(O_TMPFILE).open(dir) {
         Err(e) if needs_fallback(&e) => {
-            log_debug!(
-                "Falling back to unlinked temporary file due to O_TMPFILE not supported: {}",
-                e
-            );
+            log_debug!("Falling back to unlinked temporary file due to O_TMPFILE not supported: {}", e);
             open_unlinked(dir)
         }
         other => {
@@ -74,43 +63,23 @@ fn open_tmpfile(dir: &Path) -> io::Result<File> {
     .map_err(|e| {
         io::Error::new(
             e.kind(),
-            format!(
-                "cannot create a temporary file in {}: {} (use --temp-dir)",
-                dir.display(),
-                e
-            ),
+            format!("cannot create a temporary file in {}: {} (use --temp-dir)", dir.display(), e),
         )
     })
 }
 
 // EOPNOTSUPP: filesystem without O_TMPFILE. EISDIR: old kernel. EINVAL: wrong flag value for this arch.
 fn needs_fallback(e: &io::Error) -> bool {
-    matches!(
-        e.kind(),
-        ErrorKind::Unsupported | ErrorKind::IsADirectory | ErrorKind::InvalidInput
-    )
+    matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::IsADirectory | ErrorKind::InvalidInput)
 }
 
 fn open_unlinked(dir: &Path) -> io::Result<File> {
     for _ in 0..5 {
-        let path = dir.join(format!(
-            ".clipleaf-{}-{:016x}",
-            process::id(),
-            random_suffix()
-        ));
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-        {
+        let path = dir.join(format!(".clipleaf-{}-{:016x}", process::id(), random_suffix()));
+        match OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path) {
             Ok(file) => {
                 // this uses unlink on UNIX, making the file nameless immediately after creation
-                log_debug!(
-                    "Created temporary file at {}. Unlinking it immediately.",
-                    path.display()
-                );
+                log_debug!("Created temporary file at {}. Unlinking it immediately.", path.display());
                 fs::remove_file(&path)?;
                 return Ok(file);
             }
@@ -124,10 +93,7 @@ fn open_unlinked(dir: &Path) -> io::Result<File> {
             }
         }
     }
-    Err(io::Error::new(
-        ErrorKind::AlreadyExists,
-        "no free temporary file name",
-    ))
+    Err(io::Error::new(ErrorKind::AlreadyExists, "no free temporary file name"))
 }
 
 fn random_suffix() -> u64 {
@@ -167,16 +133,10 @@ mod tests {
         match result {
             Ok(file) => {
                 let target = fd_target(&file);
-                assert!(
-                    target.contains("/#") && target.ends_with(" (deleted)"),
-                    "{target}"
-                );
+                assert!(target.contains("/#") && target.ends_with(" (deleted)"), "{target}");
             }
             Err(e) if e.kind() == ErrorKind::Unsupported => {
-                eprintln!(
-                    "skipped: {} has no O_TMPFILE support",
-                    env::temp_dir().display()
-                );
+                eprintln!("skipped: {} has no O_TMPFILE support", env::temp_dir().display());
             }
             Err(e) => panic!("O_TMPFILE rejected: {e}"),
         }
@@ -186,9 +146,7 @@ mod tests {
     fn open_unlinked_leaves_no_name() {
         let mut file = open_unlinked(&env::temp_dir()).unwrap();
         let target = fd_target(&file);
-        let name = target
-            .strip_suffix(" (deleted)")
-            .unwrap_or_else(|| panic!("still named: {target}"));
+        let name = target.strip_suffix(" (deleted)").unwrap_or_else(|| panic!("still named: {target}"));
         assert!(!fs::exists(name).unwrap(), "{name} exists");
 
         file.write_all(b"still readable").unwrap();
@@ -200,11 +158,7 @@ mod tests {
 
     #[test]
     fn only_missing_o_tmpfile_support_falls_back() {
-        for kind in [
-            ErrorKind::Unsupported,
-            ErrorKind::IsADirectory,
-            ErrorKind::InvalidInput,
-        ] {
+        for kind in [ErrorKind::Unsupported, ErrorKind::IsADirectory, ErrorKind::InvalidInput] {
             assert!(needs_fallback(&kind.into()), "{kind:?}");
         }
         for kind in [

@@ -13,11 +13,7 @@ const KDE_CUT: &str = "application/x-kde-cutselection";
 
 /// `(mime, items)` of each stored type, in the order they are stored.
 fn counts(insert: &Insert) -> Vec<(&str, Option<u32>)> {
-    insert
-        .types
-        .iter()
-        .map(|t| (t.mime.as_str(), t.items))
-        .collect()
+    insert.types.iter().map(|t| (t.mime.as_str(), t.items)).collect()
 }
 
 /// A uri-list of `n` files (CRLF, as RFC 2483 writes it), well over the 5 KiB inline limit
@@ -42,20 +38,10 @@ fn a_gnome_cut_stores_how_many_files_it_holds() {
 fn a_kde_cut_keeps_its_marker_after_its_lists() {
     let mut daemon = Daemon::start();
     let list = b"file:///a\r\nfile:///b\r\n";
-    let entry = daemon.copy_new(&[
-        (UTF8, b"/a\n/b"),
-        (KDE_CUT, b"1"),
-        (URI_LIST, list),
-        (KDE_URI_LIST, list),
-    ]);
+    let entry = daemon.copy_new(&[(UTF8, b"/a\n/b"), (KDE_CUT, b"1"), (URI_LIST, list), (KDE_URI_LIST, list)]);
     assert_eq!(
         counts(&entry),
-        [
-            (UTF8, None),
-            (URI_LIST, Some(2)),
-            (KDE_URI_LIST, Some(2)),
-            (KDE_CUT, None),
-        ]
+        [(UTF8, None), (URI_LIST, Some(2)), (KDE_URI_LIST, Some(2)), (KDE_CUT, None),]
     );
     assert_eq!(entry.types[3].head, b"1");
 }
@@ -102,14 +88,8 @@ fn file_counts_survive_a_restart_and_a_compaction() {
             })
             .unwrap_or_else(|| panic!("no Insert for {id} in {records:?}"))
     };
-    assert_eq!(
-        counts(&insert(a.id)),
-        [(UTF8, None), (GNOME, Some(3)), (URI_LIST, Some(3))]
-    );
-    assert_eq!(
-        counts(&insert(b.id)),
-        [(URI_LIST, Some(1000)), (KDE_CUT, None)]
-    );
+    assert_eq!(counts(&insert(a.id)), [(UTF8, None), (GNOME, Some(3)), (URI_LIST, Some(3))]);
+    assert_eq!(counts(&insert(b.id)), [(URI_LIST, Some(1000)), (KDE_CUT, None)]);
     assert_eq!(counts(&insert(c.id)), [(UTF8, None)]);
     assert_eq!(insert(a.id).sizes(), a.sizes());
     assert_eq!(insert(b.id).sizes(), b.sizes());

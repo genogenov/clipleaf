@@ -2,8 +2,7 @@ use crate::{
     WlMessageRouter,
     wl::{
         objects::{
-            NoEvents, WlGlobal, WlInterface, WlObject, WlStr,
-            wl_data_control_device::WlDataControlDevice, wl_data_source::WlDataControlSource,
+            NoEvents, WlGlobal, WlInterface, WlObject, WlStr, wl_data_control_device::WlDataControlDevice, wl_data_source::WlDataControlSource,
             wl_enum, wl_registry::BoundInterface, wl_str_bytes,
         },
         wl_message_writer::WlMessageWriter,
@@ -13,16 +12,8 @@ use crate::{
 pub trait DataDeviceManagerExt {
     fn manager_id(&self) -> u32;
 
-    fn get_data_device(
-        &self,
-        writer: WlMessageWriter,
-        router: &mut WlMessageRouter,
-        seat_id: u32,
-    ) -> std::io::Result<WlDataControlDevice> {
-        let mut msg = writer.begin_message::<WlDataDeviceManager>(
-            WlDataDeviceManagerOps::GetDataDevice,
-            self.manager_id(),
-        )?;
+    fn get_data_device(&self, writer: WlMessageWriter, router: &mut WlMessageRouter, seat_id: u32) -> std::io::Result<WlDataControlDevice> {
+        let mut msg = writer.begin_message::<WlDataDeviceManager>(WlDataDeviceManagerOps::GetDataDevice, self.manager_id())?;
         let data_device_id = router.register_client(WlInterface::DataControlDevice)?;
         msg.pack_new_object_id(&data_device_id)?;
         msg.pack_u32(seat_id)?;
@@ -31,15 +22,8 @@ pub trait DataDeviceManagerExt {
         Ok(WlDataControlDevice { local_id: id })
     }
 
-    fn create_data_source(
-        &self,
-        writer: WlMessageWriter,
-        router: &mut WlMessageRouter,
-    ) -> std::io::Result<WlDataControlSource> {
-        let mut msg = writer.begin_message::<WlDataDeviceManager>(
-            WlDataDeviceManagerOps::CreateDataSource,
-            self.manager_id(),
-        )?;
+    fn create_data_source(&self, writer: WlMessageWriter, router: &mut WlMessageRouter) -> std::io::Result<WlDataControlSource> {
+        let mut msg = writer.begin_message::<WlDataDeviceManager>(WlDataDeviceManagerOps::CreateDataSource, self.manager_id())?;
         let data_source_id = router.register_client(WlInterface::DataControlSource)?;
 
         msg.pack_new_object_id(&data_source_id)?;

@@ -34,10 +34,7 @@ fn a_closed_write_end_is_reported_as_hang_up_without_being_asked_for() {
     let (rx, tx) = io::pipe().unwrap();
     drop(tx);
     let mut fds = [PollFd::new(rx.as_fd(), PollEvents::IN)];
-    assert!(matches!(
-        poll(&mut fds, None).unwrap(),
-        PollResult::Ready(1)
-    ));
+    assert!(matches!(poll(&mut fds, None).unwrap(), PollResult::Ready(1)));
     assert!(fds[0].revents().has_any(PollEvents::HUP));
 }
 
@@ -46,10 +43,7 @@ fn nothing_ready_is_a_timeout_for_zero_and_for_a_fraction_of_a_millisecond() {
     let (rx, _tx) = io::pipe().unwrap();
     for timeout in [Duration::ZERO, Duration::from_micros(10)] {
         let mut fds = [PollFd::new(rx.as_fd(), PollEvents::IN)];
-        assert!(
-            matches!(poll(&mut fds, Some(timeout)).unwrap(), PollResult::Timeout),
-            "{timeout:?}"
-        );
+        assert!(matches!(poll(&mut fds, Some(timeout)).unwrap(), PollResult::Timeout), "{timeout:?}");
         assert_eq!(fds[0].revents(), PollEvents::EMPTY);
     }
 }
@@ -60,18 +54,12 @@ fn a_timeout_too_large_for_poll_waits_like_none() {
     let (rx, mut tx) = io::pipe().unwrap();
     tx.write_all(b"x").unwrap();
     let mut fds = [PollFd::new(rx.as_fd(), PollEvents::IN)];
-    assert!(matches!(
-        poll(&mut fds, Some(Duration::MAX)).unwrap(),
-        PollResult::Ready(1)
-    ));
+    assert!(matches!(poll(&mut fds, Some(Duration::MAX)).unwrap(), PollResult::Ready(1)));
 }
 
 fn readable(event: &EventFd) -> bool {
     let mut fds = [PollFd::new(event.as_fd(), PollEvents::IN)];
-    matches!(
-        poll(&mut fds, Some(Duration::ZERO)).unwrap(),
-        PollResult::Ready(_)
-    )
+    matches!(poll(&mut fds, Some(Duration::ZERO)).unwrap(), PollResult::Ready(_))
 }
 
 #[test]

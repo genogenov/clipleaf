@@ -7,9 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use clipleaf_core::{
-    FileListFormat, FileListScan, Mime, MimeKind, log_error, mime_types::TEXT_PLAIN,
-};
+use clipleaf_core::{FileListFormat, FileListScan, Mime, MimeKind, log_error, mime_types::TEXT_PLAIN};
 use xxhash_rust::xxh3::Xxh3;
 
 use crate::storage::{MAX_INLINE_TYPE_BYTES, PayloadFile, PayloadWriter};

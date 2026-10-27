@@ -36,10 +36,7 @@ pub fn read_to_eof_now(reader: &mut PipeReader) -> Vec<u8> {
             Ok(0) => return got,
             Ok(n) => got.extend_from_slice(&chunk[..n]),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => panic!(
-                "write end still open: fd leaked (got {} bytes so far)",
-                got.len()
-            ),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => panic!("write end still open: fd leaked (got {} bytes so far)", got.len()),
             Err(e) => panic!("reading the payload failed: {e}"),
         }
     }

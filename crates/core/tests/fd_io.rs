@@ -45,12 +45,7 @@ fn unique_temp_path() -> std::path::PathBuf {
 // Nameless like the payload files copy and the daemon serve.
 fn temp_file() -> File {
     let path = unique_temp_path();
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
+    let file = OpenOptions::new().read(true).write(true).create_new(true).open(&path).unwrap();
     fs::remove_file(&path).unwrap();
     file
 }
@@ -72,10 +67,7 @@ fn servers(expected: &[u8]) -> [(&'static str, Serve<'_>); 2] {
     let file = file_with(expected);
     [
         ("bytes", Box::new(move |out| serve_bytes(out, expected))),
-        (
-            "file",
-            Box::new(move |out| serve_file(out, &file, expected.len() as u64)),
-        ),
+        ("file", Box::new(move |out| serve_file(out, &file, expected.len() as u64))),
     ]
 }
 
@@ -108,11 +100,7 @@ fn everything_arrives_through_a_pipe() {
         for (what, serve) in servers(&expected) {
             let (out, reading) = pipe_reader();
             serve(out).unwrap();
-            assert_same(
-                &reading.join().unwrap(),
-                &expected,
-                &format!("{what}, len {len}"),
-            );
+            assert_same(&reading.join().unwrap(), &expected, &format!("{what}, len {len}"));
         }
     }
 }
@@ -194,11 +182,7 @@ fn a_reader_that_closes_early_ends_the_paste_with_broken_pipe() {
 #[test]
 fn the_paste_pipe_is_grown_to_1_mib_only_for_payloads_over_a_page() {
     // Unprivileged pipes can't exceed 1 MiB, so the never-shrink branch can't be exercised here.
-    for (len, start, expected) in [
-        (4096, 64 << 10, 64 << 10),
-        (4097, 64 << 10, 1 << 20),
-        (4097, 1 << 20, 1 << 20),
-    ] {
+    for (len, start, expected) in [(4096, 64 << 10, 64 << 10), (4097, 64 << 10, 1 << 20), (4097, 1 << 20, 1 << 20)] {
         let (mut reader, writer) = io::pipe().unwrap();
         let probe = reader.try_clone().unwrap();
         fcntl_setpipe_size(&writer, start).unwrap();
@@ -224,11 +208,7 @@ fn serving_closes_the_paste_fd() {
         for (what, serve) in servers(&expected) {
             let (mut reader, writer): (PipeReader, OwnedFd) = fds::channel();
             serve(writer).unwrap();
-            assert_same(
-                &fds::read_to_eof_now(&mut reader),
-                &expected,
-                &format!("{what}, len {len}"),
-            );
+            assert_same(&fds::read_to_eof_now(&mut reader), &expected, &format!("{what}, len {len}"));
         }
     }
 }

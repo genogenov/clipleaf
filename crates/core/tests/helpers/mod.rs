@@ -11,8 +11,7 @@ use clipleaf_test_common::raw::{
 };
 
 /// A seat and the manager, both advertised at version 1.
-pub const GLOBALS: [(u32, &str, u32); 2] =
-    [(1, "wl_seat", 1), (54, "ext_data_control_manager_v1", 1)];
+pub const GLOBALS: [(u32, &str, u32); 2] = [(1, "wl_seat", 1), (54, "ext_data_control_manager_v1", 1)];
 
 pub const OFFER_A: u32 = SERVER_ID_START;
 pub const OFFER_B: u32 = SERVER_ID_START + 1;

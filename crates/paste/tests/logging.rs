@@ -31,17 +31,12 @@ fn run_failing(log: Option<&str>) -> Output {
     // The failure itself is always reported, whatever the log level.
     let err = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{err}");
-    assert!(
-        err.contains("error:") && err.contains("cannot connect"),
-        "{err}"
-    );
+    assert!(err.contains("error:") && err.contains("cannot connect"), "{err}");
     output
 }
 
 fn has_debug_lines(output: &Output) -> bool {
-    String::from_utf8_lossy(&output.stderr)
-        .lines()
-        .any(|line| line.starts_with("debug:"))
+    String::from_utf8_lossy(&output.stderr).lines().any(|line| line.starts_with("debug:"))
 }
 
 #[test]
@@ -57,10 +52,6 @@ fn clipleaf_log_off_turns_debug_lines_off_but_keeps_errors() {
 #[test]
 fn without_or_with_an_unrecognized_value_the_build_default_applies() {
     for log in [None, Some(""), Some("verbose"), Some("DEBUG")] {
-        assert_eq!(
-            has_debug_lines(&run_failing(log)),
-            cfg!(debug_assertions),
-            "CLIPLEAF_LOG={log:?}"
-        );
+        assert_eq!(has_debug_lines(&run_failing(log)), cfg!(debug_assertions), "CLIPLEAF_LOG={log:?}");
     }
 }

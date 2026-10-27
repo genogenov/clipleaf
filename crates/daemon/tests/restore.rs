@@ -15,13 +15,7 @@ use std::{
 
 use common::*;
 
-const TEXT_NAMES: [&str; 5] = [
-    "text/plain;charset=utf-8",
-    "UTF8_STRING",
-    "text/plain",
-    "STRING",
-    "TEXT",
-];
+const TEXT_NAMES: [&str; 5] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT"];
 const URI_LIST: &str = "text/uri-list";
 const KDE_CUT: &str = "application/x-kde-cutselection";
 const GNOME: &str = "x-special/gnome-copied-files";
@@ -30,17 +24,11 @@ const STALL: Duration = Duration::from_secs(5);
 
 /// Over the 5 KiB inline limit, so it is served from a payload file.
 fn big(len: usize, seed: u8) -> Vec<u8> {
-    (0..len)
-        .map(|i| b'a' + ((i + seed as usize) % 26) as u8)
-        .collect()
+    (0..len).map(|i| b'a' + ((i + seed as usize) % 26) as u8).collect()
 }
 
 fn marker_of(source: &Source) -> &str {
-    source
-        .mimes
-        .iter()
-        .find(|m| m.starts_with("x-clipleaf/"))
-        .expect("a marker")
+    source.mimes.iter().find(|m| m.starts_with("x-clipleaf/")).expect("a marker")
 }
 
 #[test]
@@ -60,23 +48,13 @@ fn a_cleared_clipboard_gets_the_newest_entry_back_with_every_stored_type() {
     assert_eq!(source.mimes.len(), 7, "{:?}", source.mimes);
     let marker = &source.mimes[6];
     let nonce = marker.strip_prefix("x-clipleaf/").expect("the marker");
-    assert!(
-        nonce.len() == 8 && nonce.bytes().all(|b| b.is_ascii_hexdigit()),
-        "{marker}"
-    );
+    assert!(nonce.len() == 8 && nonce.bytes().all(|b| b.is_ascii_hexdigit()), "{marker}");
 
     // Every text name gets the text, byte-exact; the image comes from its payload file.
     for name in TEXT_NAMES {
-        assert_eq!(
-            daemon.paste(source.id, name.as_bytes()),
-            b"newest text",
-            "{name}"
-        );
+        assert_eq!(daemon.paste(source.id, name.as_bytes()), b"newest text", "{name}");
     }
-    assert!(
-        daemon.paste(source.id, PNG.as_bytes()) == image,
-        "image bytes differ"
-    );
+    assert!(daemon.paste(source.id, PNG.as_bytes()) == image, "image bytes differ");
 }
 
 #[test]
@@ -151,12 +129,7 @@ fn a_paste_in_flight_finishes_after_the_source_is_cancelled() {
     daemon.wait_source_destroyed(source.id);
     let mut got = first;
     got.extend(read_to_eof(pipe));
-    assert!(
-        got == text,
-        "{} of {} bytes, or different bytes",
-        got.len(),
-        text.len()
-    );
+    assert!(got == text, "{} of {} bytes, or different bytes", got.len(), text.len());
 }
 
 #[test]
@@ -182,10 +155,7 @@ fn a_cut_is_offered_as_it_was_stored_marker_and_all() {
     let kde = daemon.wait_restore();
     assert!(kde.mimes.iter().any(|m| m == KDE_CUT), "{:?}", kde.mimes);
     assert_eq!(daemon.paste(kde.id, KDE_CUT.as_bytes()), b"1");
-    assert_eq!(
-        daemon.paste(kde.id, URI_LIST.as_bytes()),
-        b"file:///home/u/a.txt\r\n"
-    );
+    assert_eq!(daemon.paste(kde.id, URI_LIST.as_bytes()), b"file:///home/u/a.txt\r\n");
 
     let gnome_cut = b"cut\nfile:///home/u/b.txt";
     daemon.copy_new(&[(GNOME, gnome_cut)]);
@@ -222,20 +192,13 @@ fn a_paster_that_stops_reading_is_dropped_after_the_stall_and_others_are_served_
     let stalled = daemon.paste_start(source.id, UTF8.as_bytes());
     let started = Instant::now();
     // Another worker serves this one whole while the first waits.
-    assert!(
-        daemon.paste(source.id, UTF8.as_bytes()) == text,
-        "the second paste differs"
-    );
+    assert!(daemon.paste(source.id, UTF8.as_bytes()) == text, "the second paste differs");
     assert!(started.elapsed() < STALL, "{:?}", started.elapsed());
 
     // After the stall the daemon gives up: what is left in the pipe, then EOF.
     thread::sleep(STALL + Duration::from_secs(1) - started.elapsed());
     let got = read_to_eof(stalled);
-    assert!(
-        got.len() < text.len(),
-        "the stalled paste got all {} bytes",
-        got.len()
-    );
+    assert!(got.len() < text.len(), "the stalled paste got all {} bytes", got.len());
     assert!(text.starts_with(&got));
 }
 
@@ -249,18 +212,12 @@ fn pastes_still_queued_when_the_selection_changes_are_dropped() {
     daemon.send(&[cleared()]);
     let source = daemon.wait_restore();
 
-    let busy: Vec<_> = (0..4)
-        .map(|_| daemon.paste_start(source.id, UTF8.as_bytes()))
-        .collect();
+    let busy: Vec<_> = (0..4).map(|_| daemon.paste_start(source.id, UTF8.as_bytes())).collect();
     let queued = daemon.paste_start(source.id, UTF8.as_bytes());
     let started = Instant::now();
     daemon.copy_new(&[(UTF8, b"a new copy")]);
     assert_eq!(read_to_eof(queued), b"");
-    assert!(
-        started.elapsed() < STALL,
-        "dropped only at the stall: {:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < STALL, "dropped only at the stall: {:?}", started.elapsed());
     drop(busy);
 }
 
@@ -303,20 +260,12 @@ fn pastes_beyond_the_pending_cap_get_eof_at_once_and_the_daemon_keeps_going() {
     daemon.send(&[cleared()]);
     let source = daemon.wait_restore();
 
-    let busy: Vec<_> = (0..4)
-        .map(|_| daemon.paste_start(source.id, UTF8.as_bytes()))
-        .collect();
-    let queued: Vec<_> = (0..64)
-        .map(|_| daemon.paste_start(source.id, UTF8.as_bytes()))
-        .collect();
+    let busy: Vec<_> = (0..4).map(|_| daemon.paste_start(source.id, UTF8.as_bytes())).collect();
+    let queued: Vec<_> = (0..64).map(|_| daemon.paste_start(source.id, UTF8.as_bytes())).collect();
     let started = Instant::now();
     let over = daemon.paste_start(source.id, UTF8.as_bytes());
     assert_eq!(read_to_eof(over), b"");
-    assert!(
-        started.elapsed() < STALL,
-        "dropped only at the stall: {:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < STALL, "dropped only at the stall: {:?}", started.elapsed());
 
     drop(busy);
     drop(queued);

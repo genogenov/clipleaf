@@ -45,9 +45,7 @@ fn writer() -> Writer<impl Fn(&mut WlSessionManager, &str) -> io::Result<()>> {
     Writer {
         rig,
         source: source_id,
-        offer: move |s: &mut WlSessionManager, mime: &str| {
-            source.offer(s.get_message_writer(), mime)
-        },
+        offer: move |s: &mut WlSessionManager, mime: &str| source.offer(s.get_message_writer(), mime),
         queued: 0,
         next_filler: 0,
     }
@@ -114,11 +112,7 @@ fn answer_receives(batches: Vec<Batch>) {
     for batch in batches {
         let requests = wire::parse(&batch.bytes);
         let receives: Vec<_> = requests.iter().filter(|r| r.object_id == OFFER).collect();
-        assert_eq!(
-            receives.len(),
-            batch.fds.len(),
-            "fds and receives per recvmsg"
-        );
+        assert_eq!(receives.len(), batch.fds.len(), "fds and receives per recvmsg");
         for (request, fd) in receives.into_iter().zip(batch.fds) {
             assert_eq!(request.opcode, OFFER_RECEIVE);
             File::from(fd).write_all(request.string_at(0).0).unwrap();
@@ -140,10 +134,7 @@ fn a_message_that_exactly_fills_the_buffer_fits_without_a_flush() {
     // Header (8) + length prefix (4) + text + NUL == buffer length, no padding needed.
     let text = "x".repeat(BUF_LEN - 8 - 4 - 1);
     w.offer(&text).unwrap();
-    assert!(
-        w.rig.peer().recv_batches().is_empty(),
-        "nothing should have been sent yet"
-    );
+    assert!(w.rig.peer().recv_batches().is_empty(), "nothing should have been sent yet");
     let batches = w.flush();
     assert_eq!(w.offered(&batches), [text]);
 }
@@ -184,11 +175,7 @@ fn overflow_at_every_position_keeps_the_message_intact() {
         let early = w.rig.peer().recv_batches();
         let on_wire = all_bytes(&early).len();
         let overflowed = remaining < message_len;
-        assert_eq!(
-            on_wire,
-            if overflowed { BUF_LEN - remaining } else { 0 },
-            "remaining {remaining}"
-        );
+        assert_eq!(on_wire, if overflowed { BUF_LEN - remaining } else { 0 }, "remaining {remaining}");
         let mut batches = early;
         batches.extend(w.flush());
         assert_eq!(w.offered(&batches), expected, "remaining {remaining}");
@@ -249,10 +236,7 @@ fn committed_fds_are_closed_in_the_sender_once_sent() {
     assert_eq!(read_all(reader), "c/d");
 }
 
-fn receives(
-    w: &mut Writer<impl Fn(&mut WlSessionManager, &str) -> io::Result<()>>,
-    count: usize,
-) -> Vec<PipeReader> {
+fn receives(w: &mut Writer<impl Fn(&mut WlSessionManager, &str) -> io::Result<()>>, count: usize) -> Vec<PipeReader> {
     (0..count)
         .map(|i| {
             let (reader, fd) = fds::channel();
@@ -295,11 +279,7 @@ fn no_send_carries_more_than_28_fds_and_every_fd_stays_with_its_own_message() {
 
         answer_receives(batches);
         for (i, reader) in readers.into_iter().enumerate() {
-            assert_eq!(
-                read_all(reader),
-                format!("x/{i}"),
-                "{count} receives, message {i}"
-            );
+            assert_eq!(read_all(reader), format!("x/{i}"), "{count} receives, message {i}");
         }
     }
 }
@@ -372,10 +352,7 @@ fn destroy_has_no_arguments_and_receive_carries_the_mime_and_the_fd() {
 
     assert_eq!(fds_per_batch(&batches), [1]);
     let requests = wire::parse(&all_bytes(&batches));
-    assert_eq!(
-        (requests[0].object_id, requests[0].opcode),
-        (OFFER, OFFER_RECEIVE)
-    );
+    assert_eq!((requests[0].object_id, requests[0].opcode), (OFFER, OFFER_RECEIVE));
     assert_eq!(requests[0].string_at(0).0, b"text/plain");
     assert_eq!(
         requests[1],
@@ -386,8 +363,6 @@ fn destroy_has_no_arguments_and_receive_carries_the_mime_and_the_fd() {
         }
     );
     let mut fds_iter = batches.into_iter().flat_map(|b| b.fds);
-    File::from(fds_iter.next().unwrap())
-        .write_all(b"hello")
-        .unwrap();
+    File::from(fds_iter.next().unwrap()).write_all(b"hello").unwrap();
     assert_eq!(read_all(reader), "hello");
 }

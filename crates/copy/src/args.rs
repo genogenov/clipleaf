@@ -47,27 +47,17 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
             b"-p" | b"--primary" => out.primary = true,
             b"--file" => out.files = true,
             b"--foreground" | b"-f" => out.foreground = true,
-            b"-t" | b"--type" => {
-                out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?)
-            }
-            b"--temp-dir" => {
-                out.temp_dir = Some(value(args.next(), &program, "--temp-dir")?.into())
-            }
+            b"-t" | b"--type" => out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?),
+            b"--temp-dir" => out.temp_dir = Some(value(args.next(), &program, "--temp-dir")?.into()),
             [b'-', _, ..] => {
-                return Err(usage_error(
-                    &program,
-                    &format!("unknown option '{}'", arg.display()),
-                ));
+                return Err(usage_error(&program, &format!("unknown option '{}'", arg.display())));
             }
             _ => words.push(arg),
         }
     }
 
     if out.files && out.mime.is_some() {
-        return Err(usage_error(
-            &program,
-            "cannot use --file together with --type",
-        ));
+        return Err(usage_error(&program, "cannot use --file together with --type"));
     }
 
     if !words.is_empty() {
@@ -80,16 +70,11 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
 }
 
 fn usage_error(program_cmd: &OsString, error: &str) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("{}\n{}", error, usage(program_cmd),),
-    )
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}\n{}", error, usage(program_cmd),))
 }
 
 pub(crate) fn usage(program_cmd: &OsString) -> String {
-    let Colors {
-        bold, cyan, reset, ..
-    } = &LOGGER.colors;
+    let Colors { bold, cyan, reset, .. } = &LOGGER.colors;
     format!(
         concat!(
             "\n",
@@ -112,37 +97,17 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
 
 pub(crate) fn fallback_temp_dir() -> PathBuf {
     std::env::var_os("TMPDIR")
-        .map(|v| {
-            if v.is_empty() {
-                PathBuf::from("/tmp")
-            } else {
-                PathBuf::from(v)
-            }
-        })
+        .map(|v| if v.is_empty() { PathBuf::from("/tmp") } else { PathBuf::from(v) })
         .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Result<OsString> {
-    next.ok_or_else(|| {
-        usage_error(
-            program,
-            &format!("expected a value for option '{}'", option),
-        )
-    })
+    next.ok_or_else(|| usage_error(program, &format!("expected a value for option '{}'", option)))
 }
 
-fn parse_mime_from_args(
-    next: Option<OsString>,
-    program: &OsString,
-    option: &impl Display,
-) -> Result<String> {
+fn parse_mime_from_args(next: Option<OsString>, program: &OsString, option: &impl Display) -> Result<String> {
     let arg_value = value(next, program, option)?;
-    let value = parse_mime(arg_value.as_bytes()).map_err(|e| {
-        usage_error(
-            program,
-            &format!("invalid mime type for option '{}' - {e}", option),
-        )
-    })?;
+    let value = parse_mime(arg_value.as_bytes()).map_err(|e| usage_error(program, &format!("invalid mime type for option '{}' - {e}", option)))?;
 
     Ok(value.to_owned())
 }
@@ -225,10 +190,7 @@ mod tests {
     #[test]
     fn short_and_long_options() {
         for flag in ["-t", "--type"] {
-            assert_eq!(
-                copy_args(&[flag, "text/x-foo"]).mime.as_deref(),
-                Some("text/x-foo")
-            );
+            assert_eq!(copy_args(&[flag, "text/x-foo"]).mime.as_deref(), Some("text/x-foo"));
         }
         for flag in ["-p", "--primary"] {
             assert!(copy_args(&[flag]).primary);
@@ -239,10 +201,7 @@ mod tests {
         let parsed = copy_args(&["--file", "a.png"]);
         assert!(parsed.files);
         assert_eq!(parsed.input, words(&["a.png"]));
-        assert_eq!(
-            copy_args(&["--temp-dir", "/var/tmp"]).temp_dir,
-            Some(PathBuf::from("/var/tmp"))
-        );
+        assert_eq!(copy_args(&["--temp-dir", "/var/tmp"]).temp_dir, Some(PathBuf::from("/var/tmp")));
 
         let parsed = copy_args(&["-p", "-t", "image/png", "--temp-dir", "d", "x"]);
         assert!(parsed.primary);
@@ -278,21 +237,10 @@ mod tests {
     #[test]
     fn mime_types_are_validated() {
         let libreoffice = r#"application/x-openoffice-objectdescriptor-xml;windows_formatname="Star Object Descriptor (XML)";displayname="file:///tmp/Résumé.docx""#;
-        for mime in [
-            "text/plain;charset=utf-8",
-            "UTF8_STRING",
-            libreoffice,
-            &"a".repeat(4000),
-        ] {
+        for mime in ["text/plain;charset=utf-8", "UTF8_STRING", libreoffice, &"a".repeat(4000)] {
             assert_eq!(copy_args(&["-t", mime]).mime.as_deref(), Some(mime));
         }
-        for mime in [
-            "",
-            "text/\tplain",
-            "text/\u{1b}[31m",
-            "text/\u{9b}31m",
-            &"a".repeat(4001),
-        ] {
+        for mime in ["", "text/\tplain", "text/\u{1b}[31m", "text/\u{9b}31m", &"a".repeat(4001)] {
             assert!(invalid(&["-t", mime]).contains("'-t'"), "{mime:?}");
         }
         assert!(invalid_os(vec![os(b"--type"), os(b"text/\xff")]).contains("'--type'"));
@@ -308,10 +256,7 @@ mod tests {
     #[test]
     fn unknown_options_are_errors_that_name_the_option() {
         for flag in ["-x", "--bogus", "-pt"] {
-            assert!(
-                invalid(&[flag, "text"]).contains(&format!("'{flag}'")),
-                "{flag}"
-            );
+            assert!(invalid(&[flag, "text"]).contains(&format!("'{flag}'")), "{flag}");
         }
     }
 

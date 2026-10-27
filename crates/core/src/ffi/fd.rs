@@ -37,11 +37,7 @@ pub fn set_nonblocking(fd: BorrowedFd, nonblock: bool) -> io::Result<()> {
 }
 
 fn set_nonblock(flags: i32, nonblock: bool) -> i32 {
-    if nonblock {
-        flags | O_NONBLOCK
-    } else {
-        flags & !O_NONBLOCK
-    }
+    if nonblock { flags | O_NONBLOCK } else { flags & !O_NONBLOCK }
 }
 
 fn has_nonblock(flags: i32) -> bool {

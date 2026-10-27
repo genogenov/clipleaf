@@ -40,12 +40,7 @@ impl WalFile {
             Err(e) if e.kind() != ErrorKind::NotFound => return Err(e),
             _ => {}
         };
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .mode(0o600)
-            .open(path)?;
+        let mut file = OpenOptions::new().create(true).read(true).append(true).mode(0o600).open(path)?;
 
         let header = Header {
             salt: random_salt(),
@@ -59,12 +54,7 @@ impl WalFile {
     }
 
     pub fn open_or_create(path: &Path, max_alloc: usize) -> io::Result<WalReader> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .mode(0o600)
-            .open(path)?;
+        let mut file = OpenOptions::new().create(true).read(true).append(true).mode(0o600).open(path)?;
 
         let header = {
             let mut buff = [0u8; HEADER_LEN];
@@ -81,9 +71,7 @@ impl WalFile {
                                 | WalError::RecordTooLarge
                                 | WalError::Io(_)
                                 | WalError::UnknownType(_) => {
-                                    log_warn!(
-                                        "WAL Error during header parsing, resetting. Error: {e}"
-                                    );
+                                    log_warn!("WAL Error during header parsing, resetting. Error: {e}");
                                     Self::reset_wal(&mut file, &mut buff)
                                 }
                                 WalError::Corrupted => Self::reset_wal(&mut file, &mut buff),
@@ -116,9 +104,7 @@ impl WalFile {
     }
 
     pub fn flush(&mut self) -> io::Result<()> {
-        let res = self
-            .file
-            .write_all(&self.write_buff.buff[..self.write_buff.pos]);
+        let res = self.file.write_all(&self.write_buff.buff[..self.write_buff.pos]);
         if res.is_ok() {
             self.len += self.write_buff.pos as u64;
         }
@@ -133,11 +119,7 @@ impl WalFile {
     }
 
     pub fn flush_if_over(&mut self, threshold: usize) -> io::Result<()> {
-        if self.write_buff.pos >= threshold {
-            self.flush()
-        } else {
-            Ok(())
-        }
+        if self.write_buff.pos >= threshold { self.flush() } else { Ok(()) }
     }
 
     pub fn sync(&self) -> io::Result<()> {

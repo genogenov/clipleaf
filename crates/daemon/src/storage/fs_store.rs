@@ -20,25 +20,18 @@ pub struct FsDataStore {
 
 impl FsDataStore {
     pub fn open_data_store_dir(dir: Option<&Path>) -> io::Result<Self> {
-        let base = dir
-            .map(PathBuf::from)
-            .or_else(default_base)
-            .or_else(fallback_base)
-            .ok_or_else(|| {
-                io::Error::other(format!(
-                    "could not open data store dir after trying {:?}, {} and {}",
-                    dir, DEFAULT_DIR, HOME_DIR,
-                ))
-            })?;
+        let base = dir.map(PathBuf::from).or_else(default_base).or_else(fallback_base).ok_or_else(|| {
+            io::Error::other(format!(
+                "could not open data store dir after trying {:?}, {} and {}",
+                dir, DEFAULT_DIR, HOME_DIR,
+            ))
+        })?;
 
         log_debug!("Built base dir: {:?}", base);
 
         let payloads = base.join("payloads");
         log_debug!("Payloads dir: {:?}", payloads);
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&payloads)?;
+        DirBuilder::new().recursive(true).mode(0o700).create(&payloads)?;
         Ok(FsDataStore {
             base: Arc::from(base),
             payloads: Arc::from(payloads),
@@ -59,9 +52,7 @@ impl FsDataStore {
                 Ok(())
             }
             Err(std::fs::TryLockError::Error(e)) => Err(e),
-            Err(std::fs::TryLockError::WouldBlock) => {
-                Err(io::Error::other("another clipleafd already running"))
-            }
+            Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::other("another clipleafd already running")),
         }
     }
 

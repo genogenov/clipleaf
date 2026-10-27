@@ -6,16 +6,14 @@ use std::{
 
 use clipleaf_core::log_debug;
 use image::{
-    DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits, Pixel, Rgba,
-    RgbaImage,
+    DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits, Pixel, Rgba, RgbaImage,
     metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH},
 };
 
 use crate::{
     image::{
-        JPEG_MAX_DECODED_SIZE, JPEG_MAX_FILE_SIZE, JPEG_MAX_WIDTH, MAX_INPUT_IMG_HEIGHT,
-        MAX_TOTAL_ALLOC, PNG_MAX_DECODED_SIZE, PNG_MAX_WIDTH, THUMBNAIL_BOX_SIZE,
-        THUMBNAIL_QUALITY,
+        JPEG_MAX_DECODED_SIZE, JPEG_MAX_FILE_SIZE, JPEG_MAX_WIDTH, MAX_INPUT_IMG_HEIGHT, MAX_TOTAL_ALLOC, PNG_MAX_DECODED_SIZE, PNG_MAX_WIDTH,
+        THUMBNAIL_BOX_SIZE, THUMBNAIL_QUALITY,
     },
     storage::{ThumbNail, wal::encoder::MAX_THUMB_BYTES},
 };
@@ -69,9 +67,7 @@ impl ImageProcessingFail {
 impl From<io::Error> for ImageProcessingFail {
     fn from(e: io::Error) -> Self {
         match e.kind() {
-            ErrorKind::Interrupted | ErrorKind::OutOfMemory | ErrorKind::TimedOut => {
-                ImageProcessingFail::TransientIO(e)
-            }
+            ErrorKind::Interrupted | ErrorKind::OutOfMemory | ErrorKind::TimedOut => ImageProcessingFail::TransientIO(e),
             _ => ImageProcessingFail::PermanentIO(e),
         }
     }
@@ -96,9 +92,7 @@ where
         Some(ImageFormat::Png) => (PNG_MAX_WIDTH, PNG_MAX_DECODED_SIZE, ImageFormat::Png),
         Some(ImageFormat::Jpeg) => {
             if len > JPEG_MAX_FILE_SIZE {
-                return Err(ImageProcessingFail::Permanent(
-                    format!("jpeg file cap exceeded. Len: {len}").into(),
-                ));
+                return Err(ImageProcessingFail::Permanent(format!("jpeg file cap exceeded. Len: {len}").into()));
             }
             (JPEG_MAX_WIDTH, JPEG_MAX_DECODED_SIZE, ImageFormat::Jpeg)
         }
@@ -113,11 +107,7 @@ where
     limits.max_image_height = Some(MAX_INPUT_IMG_HEIGHT);
     limits.max_alloc = Some(MAX_TOTAL_ALLOC);
 
-    log_debug!(
-        "Img worker: processing input img format: {:?} with max width {}",
-        format,
-        max_width
-    );
+    log_debug!("Img worker: processing input img format: {:?} with max width {}", format, max_width);
 
     reader.limits(limits);
     let mut dec = reader.into_decoder()?;
@@ -153,15 +143,9 @@ where
     if jpeg.len() > MAX_THUMB_BYTES as usize {
         return Err(ImageProcessingFail::permanent_err("thumb too big"));
     }
-    let swap = matches!(
-        orientation,
-        Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH
-    );
+    let swap = matches!(orientation, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH);
     let (src_width, src_height) = if swap { (h, w) } else { (w, h) };
-    log_debug!(
-        "Img worker: produced thumbnail: W:{width}, H:{height}, size: {}",
-        jpeg.len()
-    );
+    log_debug!("Img worker: produced thumbnail: W:{width}, H:{height}, size: {}", jpeg.len());
     Ok(ThumbNail {
         width: width as u16,
         height: height as u16,
@@ -173,10 +157,7 @@ where
     })
 }
 
-fn encode_thumbnail_jpeg(
-    mut rgba: RgbaImage,
-    has_alpha: bool,
-) -> Result<Vec<u8>, ImageProcessingFail> {
+fn encode_thumbnail_jpeg(mut rgba: RgbaImage, has_alpha: bool) -> Result<Vec<u8>, ImageProcessingFail> {
     if has_alpha {
         log_debug!("Img: worker: Img has alpha, blending into background");
         blend_into_bg(&mut rgba);
@@ -186,15 +167,8 @@ fn encode_thumbnail_jpeg(
     let mut enc = jpeg_encoder::Encoder::new(&mut out, THUMBNAIL_QUALITY);
     enc.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_2_0);
     // enc.set_optimized_huffman_tables(true);
-    enc.encode(
-        &rgba,
-        width as u16,
-        height as u16,
-        jpeg_encoder::ColorType::Rgba,
-    )
-    .map_err(|e| {
-        ImageProcessingFail::Permanent(format!("Error during thumbnail encode: {e}").into())
-    })?;
+    enc.encode(&rgba, width as u16, height as u16, jpeg_encoder::ColorType::Rgba)
+        .map_err(|e| ImageProcessingFail::Permanent(format!("Error during thumbnail encode: {e}").into()))?;
 
     // let test = current_dir()?.join("test_img.jpg");
     // OpenOptions::new()

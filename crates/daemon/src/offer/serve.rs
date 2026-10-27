@@ -8,9 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use clipleaf_core::{
-    log_debug, log_error, log_warn, serve_bytes_nonblocking, serve_file_nonblocking,
-};
+use clipleaf_core::{log_debug, log_error, log_warn, serve_bytes_nonblocking, serve_file_nonblocking};
 
 use crate::{
     storage::{Data, Entry},
@@ -31,9 +29,7 @@ pub struct ServeJob {
 pub fn spawn_servers(queue: Arc<WorkQueue<ServeJob>>) -> io::Result<()> {
     for i in 0..WORKERS {
         let q = queue.clone();
-        thread::Builder::new()
-            .name(format!("serve-{i}"))
-            .spawn(move || run(&q))?;
+        thread::Builder::new().name(format!("serve-{i}")).spawn(move || run(&q))?;
     }
     Ok(())
 }
@@ -69,18 +65,11 @@ fn serve(job: ServeJob) -> io::Result<()> {
             let file = match File::open(&path) {
                 Ok(f) => f,
                 Err(e) if e.kind() == ErrorKind::NotFound => {
-                    log_warn!(
-                        "Attempt to serve non existent file from path: {}; Skipping.",
-                        &path.display()
-                    );
+                    log_warn!("Attempt to serve non existent file from path: {}; Skipping.", &path.display());
                     return Ok(());
                 }
                 Err(e) => {
-                    log_error!(
-                        "Serve: failed serving file at path {} : {}",
-                        &path.display(),
-                        e
-                    );
+                    log_error!("Serve: failed serving file at path {} : {}", &path.display(), e);
                     return Ok(());
                 }
             };

@@ -80,10 +80,7 @@ pub struct LogWriter {
 static DEBUG_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 
 pub fn init_logging() {
-    match std::env::var_os("CLIPLEAF_LOG")
-        .as_deref()
-        .and_then(|v| v.to_str())
-    {
+    match std::env::var_os("CLIPLEAF_LOG").as_deref().and_then(|v| v.to_str()) {
         Some("debug") => DEBUG_ENABLED.store(true, atomic::Ordering::Relaxed),
         Some("off") => DEBUG_ENABLED.store(false, atomic::Ordering::Relaxed),
         _ => {}

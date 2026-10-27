@@ -139,10 +139,7 @@ fn thumb_meta(tag: u8, body: &mut Reader<'_>) -> Option<Result<Option<Thumb>, ()
 impl Insert {
     /// `(mime, size)` of each type, in the order they are stored.
     pub fn sizes(&self) -> Vec<(&str, u64)> {
-        self.types
-            .iter()
-            .map(|t| (t.mime.as_str(), t.size))
-            .collect()
+        self.types.iter().map(|t| (t.mime.as_str(), t.size)).collect()
     }
 }
 
@@ -237,11 +234,7 @@ fn next_record(buf: &[u8], salt: u64) -> Option<(Record, &[u8])> {
             if !body.0.is_empty() {
                 return None;
             }
-            Record::Thumb {
-                id,
-                type_index,
-                thumb,
-            }
+            Record::Thumb { id, type_index, thumb }
         }
         kind => Record::Unknown(kind),
     };

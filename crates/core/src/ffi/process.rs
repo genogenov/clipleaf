@@ -38,10 +38,7 @@ pub fn detach() -> io::Result<()> {
     // Change the current working directory to the root to avoid holding a ref to any unmountable fs.
     env::set_current_dir("/")?;
 
-    let dev_null = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/null")?;
+    let dev_null = fs::OpenOptions::new().read(true).write(true).open("/dev/null")?;
 
     let dev_null_fd = dev_null.as_raw_fd();
 

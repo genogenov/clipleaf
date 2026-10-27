@@ -41,11 +41,7 @@ pub enum ImageSource {
     File(PathBuf),
 }
 
-pub fn spawn_workers(
-    queue: Arc<WorkQueue<ImageJob>>,
-    index_tx: Sender<IndexMsg>,
-    snap: SnapshotHandle,
-) -> io::Result<()> {
+pub fn spawn_workers(queue: Arc<WorkQueue<ImageJob>>, index_tx: Sender<IndexMsg>, snap: SnapshotHandle) -> io::Result<()> {
     for i in 0..WORKERS {
         let (queue, tx, snap) = (queue.clone(), index_tx.clone(), snap.clone());
         thread::Builder::new()

@@ -55,8 +55,7 @@ fn a_destroyed_sources_in_flight_send_gives_up_its_fd_and_does_not_steal_the_nex
     rig.peer().send_with_fds(&events, &attached);
     drop((a_fd, b_fd));
 
-    let WlSessionEvent::DataControlSend { source, mime, fd } = rig.session.next_event().unwrap()
-    else {
+    let WlSessionEvent::DataControlSend { source, mime, fd } = rig.session.next_event().unwrap() else {
         panic!("expected the send for the live source");
     };
     assert_eq!((source, &*mime), (b_id, &b"text/plain"[..]));
@@ -78,8 +77,7 @@ fn a_destroyed_sources_id_is_reused_only_after_delete_id() {
     let b = rig.session.create_data_source().unwrap();
     assert_ne!(b.local_id, a_id);
     rig.flush_and_drain();
-    rig.peer()
-        .send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &a_id.to_ne_bytes()));
+    rig.peer().send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &a_id.to_ne_bytes()));
     assert!(rig.session.try_next_event().unwrap().is_none());
     assert_eq!(rig.session.create_data_source().unwrap().local_id, a_id);
 }

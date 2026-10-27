@@ -51,9 +51,7 @@ impl Drop for Payload {
 }
 
 /// Runs one serve on its own thread; returns its result and how long it took.
-fn serve_in_thread(
-    serve: impl FnOnce() -> std::io::Result<()> + Send + 'static,
-) -> (std::io::Result<()>, Duration) {
+fn serve_in_thread(serve: impl FnOnce() -> std::io::Result<()> + Send + 'static) -> (std::io::Result<()>, Duration) {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let start = Instant::now();
@@ -65,11 +63,7 @@ fn serve_in_thread(
 
 /// Reads `chunk` bytes, then pauses `gap`, until EOF: slower than the writer, never silent
 /// for a whole stall.
-fn slow_reader(
-    mut pipe: std::io::PipeReader,
-    chunk: usize,
-    gap: Duration,
-) -> thread::JoinHandle<Vec<u8>> {
+fn slow_reader(mut pipe: std::io::PipeReader, chunk: usize, gap: Duration) -> thread::JoinHandle<Vec<u8>> {
     thread::spawn(move || {
         let mut out = Vec::new();
         let mut buf = vec![0u8; chunk];
@@ -92,23 +86,18 @@ fn a_paster_that_never_reads_is_given_up_after_the_stall() {
     let file = payload.1.try_clone().unwrap();
 
     let (_reader, writer) = std::io::pipe().unwrap();
-    let (result, took) =
-        serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &bytes, STALL));
+    let (result, took) = serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &bytes, STALL));
     assert_eq!(result.unwrap_err().kind(), ErrorKind::TimedOut);
     assert!(took >= STALL && took < STALL * 5, "{took:?}");
 
     let (_reader, writer) = std::io::pipe().unwrap();
     let f = file.try_clone().unwrap();
-    let (result, took) = serve_in_thread(move || {
-        serve_file_nonblocking(OwnedFd::from(writer), &f, LEN as u64, STALL)
-    });
+    let (result, took) = serve_in_thread(move || serve_file_nonblocking(OwnedFd::from(writer), &f, LEN as u64, STALL));
     assert_eq!(result.unwrap_err().kind(), ErrorKind::TimedOut);
     assert!(took >= STALL && took < STALL * 5, "{took:?}");
 
     let (_peer, socket) = UnixStream::pair().unwrap();
-    let (result, _) = serve_in_thread(move || {
-        serve_file_nonblocking(OwnedFd::from(socket), &file, LEN as u64, STALL)
-    });
+    let (result, _) = serve_in_thread(move || serve_file_nonblocking(OwnedFd::from(socket), &file, LEN as u64, STALL));
     assert_eq!(result.unwrap_err().kind(), ErrorKind::TimedOut);
 }
 
@@ -124,20 +113,14 @@ fn a_slow_but_steady_reader_is_never_cut_off_and_gets_every_byte() {
     let (reader, writer) = std::io::pipe().unwrap();
     let reading = slow_reader(reader, 64 * 1024, Duration::from_millis(50));
     let to_serve = bytes.clone();
-    let (result, took) =
-        serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &to_serve, STALL));
+    let (result, took) = serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &to_serve, STALL));
     result.unwrap();
-    assert!(
-        took > STALL * 2,
-        "the reader wasn't slow enough to test anything: {took:?}"
-    );
+    assert!(took > STALL * 2, "the reader wasn't slow enough to test anything: {took:?}");
     assert!(reading.join().unwrap() == bytes, "bytes differ");
 
     let (reader, writer) = std::io::pipe().unwrap();
     let reading = slow_reader(reader, 64 * 1024, Duration::from_millis(50));
-    let (result, _) = serve_in_thread(move || {
-        serve_file_nonblocking(OwnedFd::from(writer), &file, LEN as u64, STALL)
-    });
+    let (result, _) = serve_in_thread(move || serve_file_nonblocking(OwnedFd::from(writer), &file, LEN as u64, STALL));
     result.unwrap();
     assert!(reading.join().unwrap() == bytes, "bytes differ");
 }
@@ -147,8 +130,7 @@ fn a_paster_that_closes_its_end_ends_the_serve_with_broken_pipe() {
     let bytes = data(LEN);
     let (reader, writer) = std::io::pipe().unwrap();
     drop(reader);
-    let (result, _) =
-        serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &bytes, STALL));
+    let (result, _) = serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(writer), &bytes, STALL));
     assert_eq!(result.unwrap_err().kind(), ErrorKind::BrokenPipe);
 }
 
@@ -157,14 +139,10 @@ fn a_small_payload_into_a_regular_file_is_written_whole() {
     // A regular file never blocks: the non-blocking path is a plain write there.
     let payload = Payload::new(b"");
     let out = File::options().write(true).open(&payload.0).unwrap();
-    let (result, _) =
-        serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(out), b"hello, file", STALL));
+    let (result, _) = serve_in_thread(move || serve_bytes_nonblocking(OwnedFd::from(out), b"hello, file", STALL));
     result.unwrap();
     let mut written = Vec::new();
-    File::open(&payload.0)
-        .unwrap()
-        .read_to_end(&mut written)
-        .unwrap();
+    File::open(&payload.0).unwrap().read_to_end(&mut written).unwrap();
     assert_eq!(written, b"hello, file");
 }
 
@@ -179,24 +157,15 @@ fn a_payload_file_longer_than_its_recorded_length_serves_only_that_length() {
         let (reader, writer) = std::io::pipe().unwrap();
         let reading = slow_reader(reader, 1 << 20, Duration::ZERO);
         let f = payload.1.try_clone().unwrap();
-        let (result, _) = serve_in_thread(move || {
-            serve_file_nonblocking(OwnedFd::from(writer), &f, len as u64, STALL)
-        });
+        let (result, _) = serve_in_thread(move || serve_file_nonblocking(OwnedFd::from(writer), &f, len as u64, STALL));
         result.unwrap();
-        assert!(
-            reading.join().unwrap() == bytes[..len],
-            "non-blocking, len {len}"
-        );
+        assert!(reading.join().unwrap() == bytes[..len], "non-blocking, len {len}");
 
         let (reader, writer) = std::io::pipe().unwrap();
         let reading = slow_reader(reader, 1 << 20, Duration::ZERO);
         let f = payload.1.try_clone().unwrap();
-        let (result, _) =
-            serve_in_thread(move || serve_file(OwnedFd::from(writer), &f, len as u64));
+        let (result, _) = serve_in_thread(move || serve_file(OwnedFd::from(writer), &f, len as u64));
         result.unwrap();
-        assert!(
-            reading.join().unwrap() == bytes[..len],
-            "blocking, len {len}"
-        );
+        assert!(reading.join().unwrap() == bytes[..len], "blocking, len {len}");
     }
 }

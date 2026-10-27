@@ -14,11 +14,7 @@ struct Known {
 const fn known<I: WlGlobal>() -> Known {
     Known { name: &I::NAME }
 }
-const KNOWN: [Known; 3] = [
-    known::<WlSeat>(),
-    known::<ExtDataControlManagerV1>(),
-    known::<ZwlrDataControlManagerV1>(),
-];
+const KNOWN: [Known; 3] = [known::<WlSeat>(), known::<ExtDataControlManagerV1>(), known::<ZwlrDataControlManagerV1>()];
 
 #[derive(Debug, Clone, Copy)]
 pub struct RegistryInterface<I>
@@ -126,10 +122,7 @@ impl WlRegistry {
         let binding_id = router.register_client(I::INTERFACE)?;
         msg.pack_new_object_id(&binding_id)?;
         msg.end()?;
-        Ok(BoundInterface::<I>::new(
-            binding_id.commit(),
-            negotiated_version,
-        ))
+        Ok(BoundInterface::<I>::new(binding_id.commit(), negotiated_version))
     }
 
     pub fn get<I: WlGlobal>(&self) -> Option<RegistryInterface<I>> {
@@ -142,32 +135,19 @@ impl WlRegistry {
         })
     }
 
-    pub fn handle_event(
-        &mut self,
-        header: &MessageHeader,
-        reader: &mut WlMessageReader,
-    ) -> std::io::Result<()> {
+    pub fn handle_event(&mut self, header: &MessageHeader, reader: &mut WlMessageReader) -> std::io::Result<()> {
         if header.opcode == RegistryEvents::Global as u16 {
-            let global_name = reader.u32().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Failed to read global name",
-                )
-            })?;
-            let interface_name_slice = reader.str().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Failed to read interface name",
-                )
-            })?;
-            let version = reader.u32().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read version")
-            })?;
+            let global_name = reader
+                .u32()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read global name"))?;
+            let interface_name_slice = reader
+                .str()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read interface name"))?;
+            let version = reader
+                .u32()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read version"))?;
 
-            if let Some(known_idx) = KNOWN
-                .iter()
-                .position(|k| k.name.bytes == interface_name_slice)
-            {
+            if let Some(known_idx) = KNOWN.iter().position(|k| k.name.bytes == interface_name_slice) {
                 self.found[known_idx] = Some((global_name, version));
             };
             return Ok(());
@@ -205,9 +185,7 @@ mod tests {
             version,
             _marker: PhantomData,
         };
-        let bound = WlRegistry::new(2)
-            .bind(client.get_writer(), &mut router, advertised)
-            .unwrap();
+        let bound = WlRegistry::new(2).bind(client.get_writer(), &mut router, advertised).unwrap();
         client.write().unwrap();
 
         let (_, body, _) = compositor.read_next_message(ReadMode::Block).unwrap();

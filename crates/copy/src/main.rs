@@ -41,18 +41,11 @@ fn run() -> io::Result<()> {
         Command::Copy(args) => args,
     };
     if args.files {
-        return Err(io::Error::new(
-            ErrorKind::Unsupported,
-            "--file is not implemented yet",
-        ));
+        return Err(io::Error::new(ErrorKind::Unsupported, "--file is not implemented yet"));
     }
     let input = match args.input {
         Input::Args(words) => {
-            let total = words
-                .iter()
-                .map(|w| w.len() + 1)
-                .sum::<usize>()
-                .saturating_sub(1);
+            let total = words.iter().map(|w| w.len() + 1).sum::<usize>().saturating_sub(1);
             let mut words = words.into_iter();
             let mut text = words.next().unwrap_or_default().into_vec();
             text.reserve_exact(total - text.len());
@@ -127,10 +120,7 @@ fn run() -> io::Result<()> {
                         }
                     }
                     Err(e) => {
-                        return Err(io::Error::new(
-                            e.kind(),
-                            format!("Failed to fork process: {e}"),
-                        ));
+                        return Err(io::Error::new(e.kind(), format!("Failed to fork process: {e}")));
                     }
                 }
             }

@@ -87,8 +87,7 @@ impl<'a> WlMessageWriterGuard<'a> {
         }
 
         let message_length = (self.0.tx.cursor - self.0.start_position) as u32;
-        let word: &mut [u8; 4] = (&mut self.0.tx.buf
-            [self.0.start_position + 4..self.0.start_position + 8])
+        let word: &mut [u8; 4] = (&mut self.0.tx.buf[self.0.start_position + 4..self.0.start_position + 8])
             .try_into()
             .unwrap();
         *word = (u32::from_ne_bytes(*word) | message_length << 16).to_ne_bytes();
@@ -115,37 +114,21 @@ impl<'a> WlMessageWriterGuard<'a> {
     fn make_room(&mut self, n: usize) -> std::io::Result<&mut [u8]> {
         if self.0.tx.cursor + n <= self.0.tx.buf.len() {
             // SAFETY: We just checked that the slice is in bounds, so this is safe.
-            return Ok(unsafe {
-                self.0
-                    .tx
-                    .buf
-                    .get_unchecked_mut(self.0.tx.cursor..self.0.tx.cursor + n)
-            }); // happy path: same check as today
+            return Ok(unsafe { self.0.tx.buf.get_unchecked_mut(self.0.tx.cursor..self.0.tx.cursor + n) }); // happy path: same check as today
         }
         let start = self.0.start_position;
         if start == 0 {
-            return Err(std::io::Error::other(
-                "message does not fit in the write buffer",
-            )); // > 4096 bytes on its own
+            return Err(std::io::Error::other("message does not fit in the write buffer")); // > 4096 bytes on its own
         }
         let sent = self.0.tx.flush_to(self.0.socket, start)?;
         self.0.start_position -= sent;
         if self.0.tx.cursor + n <= self.0.tx.buf.len() {
             // SAFETY: We just checked that the slice is in bounds, so this is safe.
-            Ok(unsafe {
-                self.0
-                    .tx
-                    .buf
-                    .get_unchecked_mut(self.0.tx.cursor..self.0.tx.cursor + n)
-            })
+            Ok(unsafe { self.0.tx.buf.get_unchecked_mut(self.0.tx.cursor..self.0.tx.cursor + n) })
         } else if self.0.start_position == 0 {
-            Err(std::io::Error::other(
-                "message does not fit in the write buffer",
-            ))
+            Err(std::io::Error::other("message does not fit in the write buffer"))
         } else {
-            Err(std::io::Error::other(
-                "write buffer full: the compositor is not reading",
-            ))
+            Err(std::io::Error::other("write buffer full: the compositor is not reading"))
         }
     }
 }
@@ -161,11 +144,7 @@ impl<'a> WlMessageWriter<'a> {
     }
 
     #[inline(always)]
-    pub fn begin_message<T: WlObject>(
-        self,
-        op: T::Ops,
-        type_id: u32,
-    ) -> std::io::Result<WlMessageWriterGuard<'a>> {
+    pub fn begin_message<T: WlObject>(self, op: T::Ops, type_id: u32) -> std::io::Result<WlMessageWriterGuard<'a>> {
         let mut guard = WlMessageWriterGuard(self);
         guard.begin::<T>(op, type_id)?;
         Ok(guard)
@@ -234,8 +213,7 @@ mod tests {
         }
 
         fn offer(&mut self, id: u32, mime: &str) -> std::io::Result<()> {
-            WlDataControlSource { local_id: id }
-                .offer(WlMessageWriter::new(&mut self.tx, &self.sock), mime)
+            WlDataControlSource { local_id: id }.offer(WlMessageWriter::new(&mut self.tx, &self.sock), mime)
         }
 
         fn flush(&mut self) {
@@ -306,10 +284,7 @@ mod tests {
     #[test]
     fn header_second_word_is_size_high_opcode_low() {
         let mut h = Harness::new();
-        let mut msg = h
-            .writer()
-            .begin_message::<WlDisplay>(DisplayOps::GetRegistry, 1)
-            .unwrap();
+        let mut msg = h.writer().begin_message::<WlDisplay>(DisplayOps::GetRegistry, 1).unwrap();
         msg.pack_u32(2).unwrap();
         msg.end().unwrap();
         assert_eq!(h.written()[..4], 1u32.to_ne_bytes());
@@ -320,10 +295,7 @@ mod tests {
     fn strings_are_length_prefixed_nul_terminated_and_padded() {
         for text in ["", "a", "abc", "abcd", "text/plain"] {
             let mut h = Harness::new();
-            let mut msg = h
-                .writer()
-                .begin_message::<WlDisplay>(DisplayOps::Sync, 1)
-                .unwrap();
+            let mut msg = h.writer().begin_message::<WlDisplay>(DisplayOps::Sync, 1).unwrap();
             msg.pack_str(text).unwrap();
             msg.end().unwrap();
             assert_eq!(&h.written()[8..], wl_str(text), "{text:?}");
@@ -340,10 +312,7 @@ mod tests {
         ];
         for text in &consts {
             let mut h = Harness::new();
-            let mut msg = h
-                .writer()
-                .begin_message::<WlDisplay>(DisplayOps::Sync, 1)
-                .unwrap();
+            let mut msg = h.writer().begin_message::<WlDisplay>(DisplayOps::Sync, 1).unwrap();
             msg.pack_wl_str(text).unwrap();
             msg.end().unwrap();
             assert_eq!(&h.written()[8..], wl_str(text.str), "{}", text.str);
@@ -354,17 +323,11 @@ mod tests {
     fn wl_str_and_u32_arguments_survive_an_overflow_between_them() {
         // The same layout as `wl_registry.bind`: u32, string, u32, u32. The session never builds
         // a message like this after start-up, so only a unit test can push it across the edge.
-        for text in [
-            wl_str_bytes!("wl_output"),
-            wl_str_bytes!("ext_data_control_manager_v1"),
-        ] {
+        for text in [wl_str_bytes!("wl_output"), wl_str_bytes!("ext_data_control_manager_v1")] {
             for remaining in (0..=60).step_by(4) {
                 let mut h = Harness::new();
                 fill_to(&mut h, BUF_LEN - remaining);
-                let mut msg = h
-                    .writer()
-                    .begin_message::<WlRegistry>(RegistryOps::Bind, 2)
-                    .unwrap();
+                let mut msg = h.writer().begin_message::<WlRegistry>(RegistryOps::Bind, 2).unwrap();
                 msg.pack_u32(54).unwrap();
                 msg.pack_wl_str(&text).unwrap();
                 msg.pack_u32(1).unwrap();
@@ -392,8 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_error_during_an_overflow_flush_keeps_the_complete_messages_and_drops_the_partial_one()
-    {
+    fn a_send_error_during_an_overflow_flush_keeps_the_complete_messages_and_drops_the_partial_one() {
         let mut h = Harness::new();
         let (mut reader, fd) = UnixStream::pair().unwrap();
         WlDataControlOffer::receive(0xff00_0000, h.writer(), "a/first", fd.into()).unwrap();
@@ -421,16 +383,14 @@ mod tests {
         for i in 0..28 {
             let (reader, fd) = UnixStream::pair().unwrap();
             keep.push(reader);
-            WlDataControlOffer::receive(0xff00_0000, h.writer(), &format!("x/{i}"), fd.into())
-                .unwrap();
+            WlDataControlOffer::receive(0xff00_0000, h.writer(), &format!("x/{i}"), fd.into()).unwrap();
         }
         let complete = h.tx.cursor;
         h.peer = None;
 
         // The 29th fd does not fit, so the commit flushes first and the flush fails.
         let (mut last, fd) = UnixStream::pair().unwrap();
-        let err =
-            WlDataControlOffer::receive(0xff00_0000, h.writer(), "x/last", fd.into()).unwrap_err();
+        let err = WlDataControlOffer::receive(0xff00_0000, h.writer(), "x/last", fd.into()).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::BrokenPipe, "{err}");
 
         assert_eq!(h.tx.cursor, complete);

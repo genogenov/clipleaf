@@ -47,18 +47,14 @@ pub struct WlStreamWriter<'a> {
     tx: &'a mut WriteBuffer,
 }
 
-fn socket_path(
-    display_path: Option<OsString>,
-    runtime_dir: Option<OsString>,
-) -> io::Result<PathBuf> {
+fn socket_path(display_path: Option<OsString>, runtime_dir: Option<OsString>) -> io::Result<PathBuf> {
     let display_path_or_default = display_path.unwrap_or_else(|| OsString::from("wayland-0"));
     let display = Path::new(&display_path_or_default);
     if display.is_absolute() {
         return Ok(display.to_path_buf());
     }
 
-    let runtime_dir = runtime_dir
-        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
+    let runtime_dir = runtime_dir.ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
 
     Ok(Path::new(&runtime_dir).join(display))
 }
@@ -75,18 +71,10 @@ impl WlBufferedStream {
     }
 
     pub fn connect_from_env() -> std::io::Result<Self> {
-        let socket_path = socket_path(
-            env::var_os("WAYLAND_DISPLAY"),
-            env::var_os("XDG_RUNTIME_DIR"),
-        )?;
+        let socket_path = socket_path(env::var_os("WAYLAND_DISPLAY"), env::var_os("XDG_RUNTIME_DIR"))?;
         log_debug!("Wayland socket path: {}", socket_path.display());
 
-        Self::connect(&socket_path).map_err(|e| {
-            io::Error::new(
-                e.kind(),
-                format!("cannot connect to {}: {e}", socket_path.display()),
-            )
-        })
+        Self::connect(&socket_path).map_err(|e| io::Error::new(e.kind(), format!("cannot connect to {}: {e}", socket_path.display())))
     }
 
     pub(crate) fn new(socket: UnixFdStream) -> Self {
@@ -163,33 +151,20 @@ impl WlStreamWriter<'_> {
 }
 
 impl ReadBuffer {
-    fn next_message<'a>(
-        &'a mut self,
-        socket: &UnixFdStream,
-        mode: ReadMode,
-    ) -> NextMessageResult<'a> {
+    fn next_message<'a>(&'a mut self, socket: &UnixFdStream, mode: ReadMode) -> NextMessageResult<'a> {
         loop {
             if let Some(h) = self.buf[self.cursor..self.filled].first_chunk::<8>() {
                 let header = MessageHeader::parse(h);
 
-                if header.size > self.buf.len() as u16
-                    || header.size < MessageHeader::WL_HEADER_SIZE
-                {
-                    return Err(std::io::Error::other(format!(
-                        "Message size {} invalid",
-                        header.size
-                    )));
+                if header.size > self.buf.len() as u16 || header.size < MessageHeader::WL_HEADER_SIZE {
+                    return Err(std::io::Error::other(format!("Message size {} invalid", header.size)));
                 }
                 // Only return the message once all of it is in the buffer; otherwise fall
                 // through and read more bytes from the socket.
                 if self.cursor + header.size as usize <= self.filled {
                     let message_body_offset = self.cursor + MessageHeader::WL_HEADER_SIZE as usize;
                     self.cursor += header.size as usize;
-                    return Ok((
-                        header,
-                        &self.buf[message_body_offset..self.cursor],
-                        &mut self.fds,
-                    ));
+                    return Ok((header, &self.buf[message_body_offset..self.cursor], &mut self.fds));
                 }
             }
 
@@ -202,8 +177,7 @@ impl ReadBuffer {
             self.filled -= self.cursor;
             self.cursor = 0;
 
-            let new_bytes_read =
-                socket.read(&mut self.buf[remaining_bytes..], &mut self.fds, mode)?;
+            let new_bytes_read = socket.read(&mut self.buf[remaining_bytes..], &mut self.fds, mode)?;
             if new_bytes_read == 0 {
                 // EOF reached, no more messages to read.. if we have remaining bytes it means we have a partial message that we cant parse.
                 if remaining_bytes > 0 {
@@ -246,12 +220,7 @@ impl WriteBuffer {
         self.flush_to_with_mode(socket, n, self.mode)
     }
 
-    fn flush_to_with_mode(
-        &mut self,
-        socket: &UnixFdStream,
-        n: usize,
-        mode: WriteMode,
-    ) -> std::io::Result<usize> {
+    fn flush_to_with_mode(&mut self, socket: &UnixFdStream, n: usize, mode: WriteMode) -> std::io::Result<usize> {
         if n > self.cursor {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -276,10 +245,7 @@ mod tests {
     #[test]
     fn socket_path_joins_the_display_name_to_the_runtime_dir() {
         let dir = || Some(OsString::from("/run/user/1000"));
-        assert_eq!(
-            socket_path(None, dir()).unwrap(),
-            Path::new("/run/user/1000/wayland-0")
-        );
+        assert_eq!(socket_path(None, dir()).unwrap(), Path::new("/run/user/1000/wayland-0"));
         assert_eq!(
             socket_path(Some("wayland-1".into()), dir()).unwrap(),
             Path::new("/run/user/1000/wayland-1")

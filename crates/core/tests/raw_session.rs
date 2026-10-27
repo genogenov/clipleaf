@@ -16,11 +16,7 @@ use helpers::*;
 #[test]
 fn initialize_binds_the_manager_and_the_seat_and_creates_a_device() {
     // Server versions 9 (seat) and 1 (manager) are clamped to what is implemented: 1 for both.
-    let globals = [
-        (1, "wl_seat", 9),
-        (7, "wl_output", 4),
-        (54, "ext_data_control_manager_v1", 1),
-    ];
+    let globals = [(1, "wl_seat", 9), (7, "wl_output", 4), (54, "ext_data_control_manager_v1", 1)];
     let mut rig = try_rig(&globals).unwrap();
     let requests = rig.flush_and_drain();
 
@@ -30,25 +26,19 @@ fn initialize_binds_the_manager_and_the_seat_and_creates_a_device() {
     assert_eq!(strip(&requests[1]), (DISPLAY, DISPLAY_SYNC));
     assert_eq!(requests[1].u32_at(0), CALLBACK);
 
-    for (request, (name, interface, new_id)) in requests[2..4].iter().zip([
-        (54, &b"ext_data_control_manager_v1"[..], MANAGER),
-        (1, b"wl_seat", SEAT),
-    ]) {
+    for (request, (name, interface, new_id)) in requests[2..4]
+        .iter()
+        .zip([(54, &b"ext_data_control_manager_v1"[..], MANAGER), (1, b"wl_seat", SEAT)])
+    {
         assert_eq!(strip(request), (REGISTRY, REGISTRY_BIND));
         let (text, next) = request.string_at(4);
         assert_eq!(request.u32_at(0), name);
         assert_eq!(text, interface);
-        assert_eq!(
-            (request.u32_at(next), request.u32_at(next + 4)),
-            (1, new_id)
-        );
+        assert_eq!((request.u32_at(next), request.u32_at(next + 4)), (1, new_id));
     }
 
     assert_eq!(strip(&requests[4]), (MANAGER, MANAGER_GET_DATA_DEVICE));
-    assert_eq!(
-        (requests[4].u32_at(0), requests[4].u32_at(4)),
-        (DEVICE, SEAT)
-    );
+    assert_eq!((requests[4].u32_at(0), requests[4].u32_at(4)), (DEVICE, SEAT));
     assert_eq!(requests.len(), 5);
 }
 
@@ -57,10 +47,7 @@ fn initialize_fails_without_ext_data_control() {
     let Err(err) = try_rig(&[(1, "wl_seat", 9)]) else {
         panic!("initialized without ext_data_control_manager_v1");
     };
-    assert!(
-        err.to_string().contains("ext_data_control_manager_v1"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("ext_data_control_manager_v1"), "{err}");
 }
 
 #[test]
@@ -105,10 +92,8 @@ fn events_are_delivered_one_at_a_time_in_order() {
     before_send.extend(new_offer(OFFER_B, "image/png"));
     before_send.extend(primary_selection(OFFER_B));
     rig.peer().send(&before_send);
-    rig.peer().send_with_fds(
-        &source_send(source, b"text/html"),
-        &[std::os::fd::AsFd::as_fd(&fd)],
-    );
+    rig.peer()
+        .send_with_fds(&source_send(source, b"text/html"), &[std::os::fd::AsFd::as_fd(&fd)]);
     drop(fd);
     let mut after_send = source_cancelled(source);
     after_send.extend(done(CALLBACK));
@@ -128,12 +113,7 @@ fn events_are_delivered_one_at_a_time_in_order() {
     assert_eq!(offer_id, Some(OFFER_B));
     assert_eq!(rig.session.get_primary_offer().unwrap().id(), OFFER_B);
 
-    let WlSessionEvent::DataControlSend {
-        source: from,
-        mime,
-        fd,
-    } = rig.session.next_event().unwrap()
-    else {
+    let WlSessionEvent::DataControlSend { source: from, mime, fd } = rig.session.next_event().unwrap() else {
         panic!("expected the send third");
     };
     assert_eq!((from, &*mime), (source, &b"text/html"[..]));
@@ -180,11 +160,7 @@ fn a_burst_is_fully_drained_by_repeated_try_next_event() {
     let events = drain_events(&mut rig.session);
     assert_eq!(
         kinds(&events),
-        [
-            ("selection", Some(OFFER_A)),
-            ("selection", Some(OFFER_B)),
-            ("selection", Some(OFFER_C))
-        ]
+        [("selection", Some(OFFER_A)), ("selection", Some(OFFER_B)), ("selection", Some(OFFER_C))]
     );
     // Drained, and nothing more however often it is asked.
     assert!(rig.session.try_next_event().unwrap().is_none());
@@ -217,23 +193,12 @@ fn malformed_or_unexpected_events_end_in_an_error_that_consumes_only_their_own_m
     let cases = [
         ("unknown opcode", wire::msg(DEVICE, 9, &[])),
         ("missing argument", wire::msg(DEVICE, DEVICE_SELECTION, &[])),
-        (
-            "new_id outside the server range",
-            device_event(DEVICE_DATA_OFFER, 5),
-        ),
+        ("new_id outside the server range", device_event(DEVICE_DATA_OFFER, 5)),
         ("finished", wire::msg(DEVICE, DEVICE_FINISHED, &[])),
         ("object we never created", wire::msg(12, 0, &[])),
-        (
-            "callback with an unknown opcode",
-            wire::msg(CALLBACK, 7, &[]),
-        ),
+        ("callback with an unknown opcode", wire::msg(CALLBACK, 7, &[])),
     ];
-    rig.peer().send(
-        &cases
-            .iter()
-            .flat_map(|(_, m)| m.clone())
-            .collect::<Vec<_>>(),
-    );
+    rig.peer().send(&cases.iter().flat_map(|(_, m)| m.clone()).collect::<Vec<_>>());
     rig.peer().shutdown_write();
 
     // Each error consumes only its own message, so the next call reports the next case.
@@ -253,18 +218,10 @@ fn a_send_event_hands_over_raw_mime_bytes_and_its_fd() {
     // Not UTF-8: consumers only compare it with their own types, so it is just unknown.
     let raw_mime: &[u8] = &[b't', 0xff, b'/', 0xfe, 0x80];
     let (mut payload, fd) = fds::channel();
-    rig.peer().send_with_fds(
-        &source_send(source, raw_mime),
-        &[std::os::fd::AsFd::as_fd(&fd)],
-    );
+    rig.peer().send_with_fds(&source_send(source, raw_mime), &[std::os::fd::AsFd::as_fd(&fd)]);
     drop(fd);
 
-    let WlSessionEvent::DataControlSend {
-        source: from,
-        mime,
-        fd,
-    } = rig.session.next_event().unwrap()
-    else {
+    let WlSessionEvent::DataControlSend { source: from, mime, fd } = rig.session.next_event().unwrap() else {
         panic!("expected a send");
     };
     assert_eq!(from, source);
@@ -310,8 +267,7 @@ fn fds_of_two_sends_are_held_together_and_stay_paired_with_their_messages() {
     drop(write_ends);
 
     for (index, reader) in readers.iter_mut().enumerate() {
-        let WlSessionEvent::DataControlSend { mime, fd, .. } = rig.session.next_event().unwrap()
-        else {
+        let WlSessionEvent::DataControlSend { mime, fd, .. } = rig.session.next_event().unwrap() else {
             panic!("expected send {index}");
         };
         assert_eq!(&*mime, [b'm', index as u8], "message {index}");
@@ -386,10 +342,7 @@ fn clearing_the_selection_destroys_the_previous_offer() {
     rig.peer().send(&events);
 
     let events = drain_events(&mut rig.session);
-    assert_eq!(
-        kinds(&events),
-        [("selection", Some(OFFER_A)), ("selection", None)]
-    );
+    assert_eq!(kinds(&events), [("selection", Some(OFFER_A)), ("selection", None)]);
     assert!(rig.session.get_offer().is_none());
     assert_eq!(destroyed_offers(&rig.flush_and_drain()), [OFFER_A]);
 }
@@ -431,11 +384,7 @@ fn events_for_an_offer_we_already_destroyed_are_ignored() {
     let events = drain_events(&mut rig.session);
     assert_eq!(
         kinds(&events),
-        [
-            ("selection", Some(OFFER_A)),
-            ("selection", Some(OFFER_B)),
-            ("selection", None)
-        ]
+        [("selection", Some(OFFER_A)), ("selection", Some(OFFER_B)), ("selection", None)]
     );
 }
 
@@ -457,8 +406,7 @@ fn a_burst_right_after_bind_is_routed_per_offer_and_tracks_both_selections() {
     let mut events = Vec::new();
     loop {
         let event = rig.session.next_event().unwrap();
-        let finished =
-            matches!(event, WlSessionEvent::SyncDone { callback_id } if callback_id == CALLBACK);
+        let finished = matches!(event, WlSessionEvent::SyncDone { callback_id } if callback_id == CALLBACK);
         events.push(event);
         if finished {
             break;
@@ -466,23 +414,14 @@ fn a_burst_right_after_bind_is_routed_per_offer_and_tracks_both_selections() {
     }
     assert_eq!(
         kinds(&events),
-        [
-            ("selection", Some(OFFER_A)),
-            ("primary", Some(OFFER_B)),
-            ("sync", Some(CALLBACK))
-        ]
+        [("selection", Some(OFFER_A)), ("primary", Some(OFFER_B)), ("sync", Some(CALLBACK))]
     );
 
     let offer = rig.session.get_offer().unwrap();
     assert_eq!(offer.id(), OFFER_A);
+    assert_eq!(offer.offered_mime_types(), ["text/html", "text/plain;charset=utf-8"]);
     assert_eq!(
-        offer.offered_mime_types(),
-        ["text/html", "text/plain;charset=utf-8"]
-    );
-    assert_eq!(
-        pick_best_mime(offer.offered_mime_types())
-            .map(|m| m.mime().to_string())
-            .as_deref(),
+        pick_best_mime(offer.offered_mime_types()).map(|m| m.mime().to_string()).as_deref(),
         Some("text/plain;charset=utf-8")
     );
     let primary = rig.session.get_primary_offer().unwrap();
@@ -500,11 +439,7 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
     rig.session.next_event().unwrap();
 
     let (mut payload, fd) = fds::channel();
-    let asked = rig
-        .session
-        .receive_offer(false, None, fd)
-        .unwrap()
-        .map(|m| m.to_string());
+    let asked = rig.session.receive_offer(false, None, fd).unwrap().map(|m| m.to_string());
     assert_eq!(asked.as_deref(), Some("text/plain;charset=utf-8"));
 
     rig.session.flush().unwrap();
@@ -512,14 +447,8 @@ fn receive_offer_asks_the_compositor_for_the_preferred_type_with_the_fd() {
     assert_eq!(batches.iter().map(|b| b.fds.len()).sum::<usize>(), 1);
     let fd = batches.iter_mut().find_map(|b| b.fds.pop()).unwrap();
     let receive = wire::parse(&raw::all_bytes(&batches)).pop().unwrap();
-    assert_eq!(
-        (receive.object_id, receive.opcode),
-        (OFFER_A, OFFER_RECEIVE)
-    );
-    assert_eq!(
-        WlMessageReader::new(&receive.body).str(),
-        Some(&b"text/plain;charset=utf-8"[..])
-    );
+    assert_eq!((receive.object_id, receive.opcode), (OFFER_A, OFFER_RECEIVE));
+    assert_eq!(WlMessageReader::new(&receive.body).str(), Some(&b"text/plain;charset=utf-8"[..]));
     std::fs::File::from(fd).write_all(b"data").unwrap();
     assert_eq!(fds::read_to_eof_now(&mut payload), b"data");
 }
@@ -538,12 +467,7 @@ fn receive_offer_with_a_type_that_is_not_offered_asks_for_nothing_and_with_no_of
     rig.peer().send(&events);
     rig.session.next_event().unwrap();
     let (mut payload, fd) = fds::channel();
-    assert!(
-        rig.session
-            .receive_offer(false, Some("image/png"), fd)
-            .unwrap()
-            .is_none()
-    );
+    assert!(rig.session.receive_offer(false, Some("image/png"), fd).unwrap().is_none());
     assert_eq!(fds::read_to_eof_now(&mut payload), b"");
     assert!(rig.flush_and_drain().is_empty(), "no receive was sent");
 }
@@ -553,14 +477,7 @@ fn mime_types_are_filtered_deduplicated_and_capped() {
     let mut rig = rig();
     let mut events = device_event(DEVICE_DATA_OFFER, OFFER_A);
     // Order kept, duplicates dropped, invalid types (control characters, empty, non-UTF-8) skipped.
-    for mime in [
-        &b"image/webp"[..],
-        b"text/plain",
-        b"image/webp",
-        b"text/\x1b[31m",
-        b"",
-        b"text/\xff",
-    ] {
+    for mime in [&b"image/webp"[..], b"text/plain", b"image/webp", b"text/\x1b[31m", b"", b"text/\xff"] {
         events.extend(wire::msg(OFFER_A, OFFER_OFFER, &wire::string(mime)));
     }
     // More than the cap of 128: the rest is skipped.
@@ -592,25 +509,15 @@ fn the_preferred_type_is_the_best_known_text_then_other_text_then_the_first() {
         events.extend(selection(OFFER_A));
         rig.peer().send(&events);
         rig.session.next_event().unwrap();
-        pick_best_mime(rig.session.get_offer().unwrap().offered_mime_types())
-            .map(|m| m.mime().to_string())
+        pick_best_mime(rig.session.get_offer().unwrap().offered_mime_types()).map(|m| m.mime().to_string())
     };
     assert_eq!(
         preferred(&["text/html", "STRING", "UTF8_STRING", "image/png"]).as_deref(),
         Some("UTF8_STRING")
     );
-    assert_eq!(
-        preferred(&["image/png", "text/uri-list"]).as_deref(),
-        Some("text/uri-list")
-    );
-    assert_eq!(
-        preferred(&["image/png", "image/jpeg"]).as_deref(),
-        Some("image/png")
-    );
-    assert_eq!(
-        preferred(&["text/plain;charset=utf-16", "text/html"]).as_deref(),
-        Some("text/html")
-    );
+    assert_eq!(preferred(&["image/png", "text/uri-list"]).as_deref(), Some("text/uri-list"));
+    assert_eq!(preferred(&["image/png", "image/jpeg"]).as_deref(), Some("image/png"));
+    assert_eq!(preferred(&["text/plain;charset=utf-16", "text/html"]).as_deref(), Some("text/html"));
     assert_eq!(
         preferred(&["text/plain;charset=utf-16", "image/png"]).as_deref(),
         Some("text/plain;charset=utf-16")
@@ -627,10 +534,7 @@ fn a_requested_type_must_match_exactly() {
     rig.peer().send(&events);
     rig.session.next_event().unwrap();
     let offer = rig.session.get_offer().unwrap();
-    assert_eq!(
-        offer.asked_mime_type("image/png").map(|m| m.as_ref()),
-        Some("image/png")
-    );
+    assert_eq!(offer.asked_mime_type("image/png").map(|m| m.as_ref()), Some("image/png"));
     for missing in ["image", "text/plain", "IMAGE/PNG"] {
         assert!(offer.asked_mime_type(missing).is_none(), "{missing}");
     }
@@ -644,8 +548,7 @@ fn object_ids_are_dense_and_reused_after_delete_id() {
     let b = rig.session.create_data_source().unwrap().local_id;
     assert_eq!((a, b), (7, 8));
     // Reused after the compositor confirms the delete.
-    rig.peer()
-        .send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &a.to_ne_bytes()));
+    rig.peer().send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &a.to_ne_bytes()));
     assert!(rig.session.try_next_event().unwrap().is_none());
     assert_eq!(rig.session.create_data_source().unwrap().local_id, a);
 }
@@ -659,14 +562,8 @@ fn offers_anywhere_in_the_server_range_up_to_the_cap_are_tracked() {
         events.extend(selection(id));
         rig.peer().send(&events);
 
-        assert_eq!(
-            kinds(&drain_events(&mut rig.session)),
-            [("selection", Some(id))]
-        );
-        assert_eq!(
-            rig.session.get_offer().unwrap().offered_mime_types(),
-            ["text/plain"]
-        );
+        assert_eq!(kinds(&drain_events(&mut rig.session)), [("selection", Some(id))]);
+        assert_eq!(rig.session.get_offer().unwrap().offered_mime_types(), ["text/plain"]);
     }
 }
 
@@ -691,10 +588,7 @@ fn a_new_offer_reusing_the_id_of_a_live_offer_is_an_error() {
     rig.peer().send(&events);
     rig.peer().shutdown_write();
 
-    assert_eq!(
-        kinds(&[rig.session.next_event().unwrap()]),
-        [("selection", Some(OFFER_A))]
-    );
+    assert_eq!(kinds(&[rig.session.next_event().unwrap()]), [("selection", Some(OFFER_A))]);
     let err = err_of(rig.session.next_event());
     assert_ne!(err.kind(), ErrorKind::UnexpectedEof, "{err}");
 }

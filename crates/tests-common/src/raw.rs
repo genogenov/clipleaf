@@ -21,8 +21,7 @@ use std::{
 };
 
 use rustix::net::{
-    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, SendAncillaryBuffer,
-    SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
+    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags, SendAncillaryBuffer, SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
 };
 
 /// Object ids and opcodes of the protocol as written in the XML (not taken from clipleaf).
@@ -113,11 +112,7 @@ pub mod wire {
             let len = self.u32_at(offset) as usize;
             let start = offset + 4;
             let bytes = &self.body[start..start + len - 1];
-            assert_eq!(
-                self.body[start + len - 1],
-                0,
-                "string is not NUL terminated"
-            );
+            assert_eq!(self.body[start + len - 1], 0, "string is not NUL terminated");
             (bytes, start + len.next_multiple_of(4))
         }
     }
@@ -177,11 +172,7 @@ impl RawCompositor {
         };
         let path = dir.join("wayland-raw");
         let listener = UnixListener::bind(&path).expect("bind");
-        Self {
-            dir,
-            path,
-            listener,
-        }
+        Self { dir, path, listener }
     }
 
     pub fn path(&self) -> &Path {
@@ -227,28 +218,19 @@ impl RawPeer {
 
     /// One `sendmsg` with these bytes and fds (the fds ride with the first byte).
     pub fn send_with_fds(&self, bytes: &[u8], fds: &[BorrowedFd<'_>]) {
-        let mut space =
-            vec![MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(fds.len().max(1)))];
+        let mut space = vec![MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(fds.len().max(1)))];
         let mut control = SendAncillaryBuffer::new(&mut space);
         if !fds.is_empty() {
             assert!(control.push(SendAncillaryMessage::ScmRights(fds)));
         }
-        let sent = sendmsg(
-            &self.sock,
-            &[IoSlice::new(bytes)],
-            &mut control,
-            SendFlags::NOSIGNAL,
-        )
-        .expect("sendmsg");
+        let sent = sendmsg(&self.sock, &[IoSlice::new(bytes)], &mut control, SendFlags::NOSIGNAL).expect("sendmsg");
         assert_eq!(sent, bytes.len(), "short sendmsg");
     }
 
     /// Stops this side's sending, so the client reads EOF after what was already sent. The
     /// client can still send requests.
     pub fn shutdown_write(&self) {
-        self.sock
-            .shutdown(std::net::Shutdown::Write)
-            .expect("shutdown");
+        self.sock.shutdown(std::net::Shutdown::Write).expect("shutdown");
     }
 
     /// Closes the connection.
@@ -276,10 +258,7 @@ impl RawPeer {
                 Err(rustix::io::Errno::INTR) => continue,
                 Err(e) => panic!("recvmsg: {e}"),
             };
-            assert!(
-                !received.flags.contains(ReturnFlags::CTRUNC),
-                "control data truncated"
-            );
+            assert!(!received.flags.contains(ReturnFlags::CTRUNC), "control data truncated");
             let mut fds = Vec::new();
             for message in control.drain() {
                 if let RecvAncillaryMessage::ScmRights(received_fds) = message {

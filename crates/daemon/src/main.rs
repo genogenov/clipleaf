@@ -24,8 +24,7 @@ use crate::{
     index::SnapshotHandle,
     jobs::{JobData, JobId, JobList, JobOutcome, JobResult},
     offer::{
-        DataOwner, MAX_FETCHED_TYPES, MAX_PENDING_SERVES, RESTORE_ON_CLEAR, RESTORE_ON_START,
-        TRACK_PRIMARY_SELECTION,
+        DataOwner, MAX_FETCHED_TYPES, MAX_PENDING_SERVES, RESTORE_ON_CLEAR, RESTORE_ON_START, TRACK_PRIMARY_SELECTION,
         offers_fetch::FetchJobDispatcher,
         serve::{ServeJob, spawn_servers},
     },
@@ -62,10 +61,7 @@ impl Daemon {
         let (log_tx, restored) = match init_wal(&store, &mut seq_counter) {
             Ok(it) => it,
             Err(err) => {
-                return Err(io::Error::new(
-                    err.kind(),
-                    format!("Failed to span WAL: {}", err),
-                ));
+                return Err(io::Error::new(err.kind(), format!("Failed to span WAL: {}", err)));
             }
         };
 
@@ -76,13 +72,7 @@ impl Daemon {
         spawn_servers(serve_queue.clone())?;
 
         log_debug!("Spawning index..");
-        let (index_tx, snapshot) = index::spawn_index(
-            MAX_HISTORY_LIMIT,
-            log_tx.clone(),
-            restored,
-            img_queue.clone(),
-            store.payloads_dir(),
-        )?;
+        let (index_tx, snapshot) = index::spawn_index(MAX_HISTORY_LIMIT, log_tx.clone(), restored, img_queue.clone(), store.payloads_dir())?;
 
         log_debug!("Spawnig Img processing threads..");
         image::spawn_workers(img_queue.clone(), index_tx.clone(), snapshot.clone())?;
@@ -131,20 +121,15 @@ impl Daemon {
                     return;
                 }
                 if self.seq_counter >= MAX_ENTRY_ID {
-                    log_error!(
-                        "entry ids exhausted ({MAX_ENTRY_ID}): not recording new copies. This is probably a bug."
-                    );
+                    log_error!("entry ids exhausted ({MAX_ENTRY_ID}): not recording new copies. This is probably a bug.");
                     return;
                 }
                 let offered_mimes = offer.offered_mime_types();
                 let fetch_mimes = pick_fetch_mimes(offered_mimes, MAX_FETCHED_TYPES);
-                match self.fetch_dispatcher.start_fetch(
-                    &mut self.session,
-                    is_primary,
-                    fetch_mimes,
-                    &mut self.jobs,
-                    self.seq_counter,
-                ) {
+                match self
+                    .fetch_dispatcher
+                    .start_fetch(&mut self.session, is_primary, fetch_mimes, &mut self.jobs, self.seq_counter)
+                {
                     Ok(job_id) => {
                         if is_primary {
                             self.pending_primary_fetch = job_id;
@@ -159,9 +144,7 @@ impl Daemon {
                 self.seq_counter += 1;
             }
             None => {
-                if (first_selection_event && RESTORE_ON_START)
-                    || (!first_selection_event && RESTORE_ON_CLEAR)
-                {
+                if (first_selection_event && RESTORE_ON_START) || (!first_selection_event && RESTORE_ON_CLEAR) {
                     log_debug!("Restoring last history entry");
                     if is_primary && self.pending_primary_fetch.is_some() {
                         self.pending_primary_restore = self.pending_primary_fetch;
@@ -177,9 +160,7 @@ impl Daemon {
 
     fn restore_selection_with_latest(&mut self, is_primary: bool) {
         if let Some(item) = self.snapshot.get_clone().items.first()
-            && let Err(e) =
-                self.data_owner
-                    .restore(&mut self.session, item.entry.clone(), is_primary)
+            && let Err(e) = self.data_owner.restore(&mut self.session, item.entry.clone(), is_primary)
         {
             log_error!("Failed to restore selection to last history entry: {e}");
         }
@@ -242,18 +223,10 @@ fn run() -> io::Result<()> {
                 daemon.pending_main_fetch.take_if(|id| *id == msg.id);
                 daemon.pending_primary_fetch.take_if(|id| *id == msg.id);
 
-                if daemon
-                    .pending_main_restore
-                    .take_if(|id| *id == msg.id)
-                    .is_some()
-                {
+                if daemon.pending_main_restore.take_if(|id| *id == msg.id).is_some() {
                     daemon.restore_selection_with_latest(false);
                 }
-                if daemon
-                    .pending_primary_restore
-                    .take_if(|id| *id == msg.id)
-                    .is_some()
-                {
+                if daemon.pending_primary_restore.take_if(|id| *id == msg.id).is_some() {
                     daemon.restore_selection_with_latest(true);
                 }
 
@@ -290,10 +263,7 @@ fn run() -> io::Result<()> {
                 }
                 WlSessionEvent::DataControlSend { source, mime, fd } => {
                     if let Some(job) = daemon.data_owner.on_send(source, &mime, fd)
-                        && daemon
-                            .serve_queue
-                            .try_push(job, MAX_PENDING_SERVES)
-                            .is_none()
+                        && daemon.serve_queue.try_push(job, MAX_PENDING_SERVES).is_none()
                     {
                         log_debug!(
                             "The limit of pending serve jobs has been reached: {MAX_PENDING_SERVES}. Dropping new jobs until existing jobs drop below the limit."
@@ -301,9 +271,7 @@ fn run() -> io::Result<()> {
                     }
                 }
                 WlSessionEvent::DataControlCancelled { source } => {
-                    daemon
-                        .data_owner
-                        .on_cancelled(&mut daemon.session, source)?;
+                    daemon.data_owner.on_cancelled(&mut daemon.session, source)?;
                 }
                 _ => {}
             }

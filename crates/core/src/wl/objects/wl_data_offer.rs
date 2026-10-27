@@ -77,8 +77,7 @@ impl WlDataControlOffer {
         } else if let Some(known) = KNOWN_MIME_TYPES.iter().find(|m| **m == parsed_mime) {
             self.offered_mime_types.push(Cow::Borrowed(known));
         } else {
-            self.offered_mime_types
-                .push(Cow::Owned(parsed_mime.to_owned()))
+            self.offered_mime_types.push(Cow::Owned(parsed_mime.to_owned()))
         }
     }
 
@@ -86,14 +85,8 @@ impl WlDataControlOffer {
         self.id
     }
 
-    pub fn receive(
-        id: u32,
-        writer: WlMessageWriter,
-        mime: &str,
-        fd: OwnedFd,
-    ) -> Result<(), std::io::Error> {
-        let mut msg =
-            writer.begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Receive, id)?;
+    pub fn receive(id: u32, writer: WlMessageWriter, mime: &str, fd: OwnedFd) -> Result<(), std::io::Error> {
+        let mut msg = writer.begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Receive, id)?;
         msg.pack_str(mime)?;
         msg.end_with_fd(fd)?;
         Ok(())
@@ -105,23 +98,16 @@ impl WlDataControlOffer {
         Ok(())
     }
 
-    pub fn parse_message<'a>(
-        opcode: u16,
-        buffer: &'a [u8],
-        _fds: &mut InFdBuffer,
-    ) -> std::io::Result<DataControlOfferEvent<'a>> {
+    pub fn parse_message<'a>(opcode: u16, buffer: &'a [u8], _fds: &mut InFdBuffer) -> std::io::Result<DataControlOfferEvent<'a>> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
             OFFER => {
-                let mime = reader.str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read mime")
-                })?;
+                let mime = reader
+                    .str()
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read mime"))?;
                 Ok(DataControlOfferEvent::Offer { mime })
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Unknown opcode",
-            )),
+            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Unknown opcode")),
         }
     }
 }

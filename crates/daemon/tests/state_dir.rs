@@ -61,11 +61,7 @@ fn a_daemon_killed_during_a_fetch_restarts_with_nothing_half_kept() {
 
     // The restart sweeps the partial file: there is no Insert for it to belong to.
     let mut daemon = Daemon::start_in(&state);
-    assert!(
-        state.payload_files().is_empty(),
-        "{:?}",
-        state.payload_files()
-    );
+    assert!(state.payload_files().is_empty(), "{:?}", state.payload_files());
     assert!(records(&state.wal_bytes()).is_empty());
     let entry = daemon.copy_new(&[(UTF8, b"after the crash")]);
     assert_eq!(entry.sizes(), [(UTF8, 15)]);
@@ -102,10 +98,7 @@ fn a_second_daemon_on_the_same_history_exits_with_an_error() {
     };
     assert!(!status.success(), "{status}");
     let mut listener = [PollFd::new(comp.listener_fd(), PollEvents::IN)];
-    assert!(matches!(
-        poll(&mut listener, Some(Duration::ZERO)).unwrap(),
-        PollResult::Timeout
-    ));
+    assert!(matches!(poll(&mut listener, Some(Duration::ZERO)).unwrap(), PollResult::Timeout));
     assert_eq!(state.wal_bytes(), wal);
 
     // The first one is untouched and keeps recording.

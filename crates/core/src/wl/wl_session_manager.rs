@@ -5,16 +5,12 @@ use std::{
 };
 
 use crate::{
-    BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt,
-    ExtDataControlManagerV1, WlBufferedStream, WlDataControlDevice, WlDataControlOffer,
-    WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker, WlSeat,
+    BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt, ExtDataControlManagerV1, WlBufferedStream,
+    WlDataControlDevice, WlDataControlOffer, WlDataControlSourceEvent, WlDisplay, WlMessageReader, WlMessageRouter, WlOfferTracker, WlSeat,
     log_debug, pick_best_mime,
     unix_fd_stream::ReadMode,
     wl::{
-        objects::{
-            WlCallbackEvents, WlGlobal, WlInterface, wl_data_source::WlDataControlSource,
-            wl_display::DisplayEvent, wl_registry::WlRegistry,
-        },
+        objects::{WlCallbackEvents, WlGlobal, WlInterface, wl_data_source::WlDataControlSource, wl_display::DisplayEvent, wl_registry::WlRegistry},
         wl_buffered_stream::{WlStreamWriter, WlWireMessage},
         wl_message_router::Route,
         wl_message_writer::WlMessageWriter,
@@ -23,23 +19,11 @@ use crate::{
 
 #[derive(Debug)]
 pub enum WlSessionEvent {
-    Selection {
-        offer_id: Option<u32>,
-    },
-    PrimarySelection {
-        offer_id: Option<u32>,
-    },
-    DataControlSend {
-        source: u32,
-        mime: Box<[u8]>,
-        fd: OwnedFd,
-    },
-    DataControlCancelled {
-        source: u32,
-    },
-    SyncDone {
-        callback_id: u32,
-    },
+    Selection { offer_id: Option<u32> },
+    PrimarySelection { offer_id: Option<u32> },
+    DataControlSend { source: u32, mime: Box<[u8]>, fd: OwnedFd },
+    DataControlCancelled { source: u32 },
+    SyncDone { callback_id: u32 },
 }
 
 pub struct WlSessionManager {
@@ -85,18 +69,16 @@ impl WlSessionManager {
                 ext_data_control_manager.version
             );
 
-            let mgr_local =
-                registry.bind(stream.get_writer(), &mut router, ext_data_control_manager)?;
+            let mgr_local = registry.bind(stream.get_writer(), &mut router, ext_data_control_manager)?;
             let seat_local = registry.bind(
                 stream.get_writer(),
                 &mut router,
-                registry.get::<WlSeat>().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::NotFound, "wl_seat not found")
-                })?,
+                registry
+                    .get::<WlSeat>()
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "wl_seat not found"))?,
             )?;
 
-            let local_data_device =
-                mgr_local.get_data_device(stream.get_writer(), &mut router, seat_local.local_id)?;
+            let local_data_device = mgr_local.get_data_device(stream.get_writer(), &mut router, seat_local.local_id)?;
 
             log_debug!(
                 "Bound ExtDataControlManagerV1 to local id {}, and WlSeat to local id {} and got DataDevice with local id {}",
@@ -114,9 +96,7 @@ impl WlSessionManager {
                 registry,
             })
         } else {
-            Err(std::io::Error::other(
-                "this compositor does not support ext_data_control_manager_v1",
-            ))
+            Err(std::io::Error::other("this compositor does not support ext_data_control_manager_v1"))
         }
     }
 
@@ -126,13 +106,11 @@ impl WlSessionManager {
     }
 
     pub fn set_selection(&mut self, source_id: u32) -> std::io::Result<()> {
-        self.local_data_device
-            .set_selection(self.stream.get_writer(), source_id)
+        self.local_data_device.set_selection(self.stream.get_writer(), source_id)
     }
 
     pub fn set_primary_selection(&mut self, source_id: u32) -> std::io::Result<()> {
-        self.local_data_device
-            .set_primary_selection(self.stream.get_writer(), source_id)
+        self.local_data_device.set_primary_selection(self.stream.get_writer(), source_id)
     }
 
     pub fn schedule_sync(&mut self) -> Result<u32, std::io::Error> {
@@ -192,15 +170,8 @@ impl WlSessionManager {
             let msg = reader.read_next_message(mode)?;
             if let Some(event) = match router.lookup_interface(msg.0.object_id)? {
                 Route::Destroyed(WlInterface::DataControlSource) => {
-                    log_debug!(
-                        "Received message for destroyed DataControlSource object_id: {:?}",
-                        msg.0.object_id
-                    );
-                    drop(WlDataControlSource::parse_message(
-                        msg.0.opcode,
-                        msg.1,
-                        msg.2,
-                    )?);
+                    log_debug!("Received message for destroyed DataControlSource object_id: {:?}", msg.0.object_id);
+                    drop(WlDataControlSource::parse_message(msg.0.opcode, msg.1, msg.2)?);
                     None
                 }
                 Route::Destroyed(WlInterface::DataControlOffer) => {
@@ -208,13 +179,9 @@ impl WlSessionManager {
                     None
                 }
                 Route::Destroyed(other) => {
-                    return Err(io::Error::other(format!(
-                        "destroyed {other:?} not supported"
-                    )));
+                    return Err(io::Error::other(format!("destroyed {other:?} not supported")));
                 }
-                Route::Live(interface) => {
-                    Self::handle_event(router, registry, tracker, &mut writer, interface, msg)?
-                }
+                Route::Live(interface) => Self::handle_event(router, registry, tracker, &mut writer, interface, msg)?,
             } {
                 return Ok(event);
             }
@@ -265,8 +232,7 @@ impl WlSessionManager {
             WlInterface::ZwlrDataControlManager => Ok(None),
             WlInterface::DataDeviceManager => Ok(None),
             WlInterface::DataControlDevice => {
-                let data_control_device_event =
-                    WlDataControlDevice::parse_message(header.opcode, body, fds)?;
+                let data_control_device_event = WlDataControlDevice::parse_message(header.opcode, body, fds)?;
                 match data_control_device_event {
                     DataControlDeviceEvent::DataOffer { new_id } => {
                         router.register_server_object(WlInterface::DataControlOffer, new_id)?;
@@ -282,9 +248,7 @@ impl WlSessionManager {
                         Ok(Some(WlSessionEvent::Selection { offer_id }))
                     }
                     DataControlDeviceEvent::PrimarySelection { offer_id } => {
-                        if let Some(prior_primary_selection) =
-                            tracker.primary_selection(&offer_id)?
-                        {
+                        if let Some(prior_primary_selection) = tracker.primary_selection(&offer_id)? {
                             // log_debug!(
                             //     "Destroying prior primary selection: {:?}",
                             //     prior_primary_selection
@@ -302,28 +266,20 @@ impl WlSessionManager {
             WlInterface::DataControlSource => {
                 let event = WlDataControlSource::parse_message(header.opcode, body, fds)?;
                 match event {
-                    WlDataControlSourceEvent::Send { mime_type, fd } => {
-                        Ok(Some(WlSessionEvent::DataControlSend {
-                            source: header.object_id,
-                            mime: mime_type.into(),
-                            fd,
-                        }))
-                    }
-                    WlDataControlSourceEvent::Cancelled => {
-                        Ok(Some(WlSessionEvent::DataControlCancelled {
-                            source: header.object_id,
-                        }))
-                    }
+                    WlDataControlSourceEvent::Send { mime_type, fd } => Ok(Some(WlSessionEvent::DataControlSend {
+                        source: header.object_id,
+                        mime: mime_type.into(),
+                        fd,
+                    })),
+                    WlDataControlSourceEvent::Cancelled => Ok(Some(WlSessionEvent::DataControlCancelled { source: header.object_id })),
                 }
             }
-            WlInterface::DataControlOffer => {
-                match WlDataControlOffer::parse_message(header.opcode, body, fds)? {
-                    DataControlOfferEvent::Offer { mime } => {
-                        tracker.data_control_offer(header.object_id, mime)?;
-                        Ok(None)
-                    }
+            WlInterface::DataControlOffer => match WlDataControlOffer::parse_message(header.opcode, body, fds)? {
+                DataControlOfferEvent::Offer { mime } => {
+                    tracker.data_control_offer(header.object_id, mime)?;
+                    Ok(None)
                 }
-            }
+            },
             WlInterface::Registry => {
                 registry.handle_event(&header, &mut WlMessageReader::new(body))?;
                 Ok(None)
@@ -331,12 +287,7 @@ impl WlSessionManager {
         }
     }
 
-    fn drop_offer(
-        router: &mut WlMessageRouter,
-        tracker: &mut WlOfferTracker,
-        writer: &mut WlStreamWriter<'_>,
-        id: u32,
-    ) -> std::io::Result<()> {
+    fn drop_offer(router: &mut WlMessageRouter, tracker: &mut WlOfferTracker, writer: &mut WlStreamWriter<'_>, id: u32) -> std::io::Result<()> {
         WlDataControlOffer::destroy(id, writer.get_writer())?;
         tracker.remove(id);
         router.mark_destroyed(id)
@@ -354,12 +305,7 @@ impl WlSessionManager {
         self.stream.has_pending_writes()
     }
 
-    pub fn receive_offer(
-        &mut self,
-        primary: bool,
-        preferred_mime: Option<&str>,
-        fd: OwnedFd,
-    ) -> Result<Option<&Cow<'_, str>>, std::io::Error> {
+    pub fn receive_offer(&mut self, primary: bool, preferred_mime: Option<&str>, fd: OwnedFd) -> Result<Option<&Cow<'_, str>>, std::io::Error> {
         let Some(offer) = (if primary {
             self.offer_tracker.get_primary_selected_slot()
         } else {

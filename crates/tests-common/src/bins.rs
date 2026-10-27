@@ -80,11 +80,7 @@ impl Guarded {
             err.read_to_end(&mut stderr).expect("read stderr");
         }
         let status = c.wait().expect("wait");
-        Output {
-            status,
-            stdout,
-            stderr,
-        }
+        Output { status, stdout, stderr }
     }
 }
 
@@ -114,8 +110,7 @@ pub fn start(comp: &TestCompositor, mut command: Command, input: Option<&[u8]>) 
         let mut stdin = child.stdin.take().expect("stdin");
         stdin.write_all(input).expect("write stdin");
     }
-    let Note::ClientConnected(client) = comp.wait_for(|n| matches!(n, Note::ClientConnected(_)))
-    else {
+    let Note::ClientConnected(client) = comp.wait_for(|n| matches!(n, Note::ClientConnected(_))) else {
         unreachable!()
     };
     Started {
@@ -151,10 +146,7 @@ impl Started {
 
     /// Waits until the child owns the (primary) selection; returns the offered types.
     pub fn wait_selection(&mut self, comp: &TestCompositor, primary: bool) -> Vec<String> {
-        match self.wait_for(
-            comp,
-            |n| matches!(n, Note::Selection { primary: p, mimes: Some(_) } if *p == primary),
-        ) {
+        match self.wait_for(comp, |n| matches!(n, Note::Selection { primary: p, mimes: Some(_) } if *p == primary)) {
             Note::Selection { mimes, .. } => mimes.unwrap_or_default(),
             _ => unreachable!(),
         }

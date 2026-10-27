@@ -25,10 +25,7 @@ impl WlOfferTracker {
 
     pub fn get_selected_slot(&self) -> Option<&WlDataControlOffer> {
         if let Some(selection_id) = self.selection_id {
-            self.offers
-                .iter()
-                .flatten()
-                .find(|offer| offer.id() == selection_id)
+            self.offers.iter().flatten().find(|offer| offer.id() == selection_id)
         } else {
             None
         }
@@ -36,10 +33,7 @@ impl WlOfferTracker {
 
     pub fn get_primary_selected_slot(&self) -> Option<&WlDataControlOffer> {
         if let Some(primary_selection_id) = self.primary_selection_id {
-            self.offers
-                .iter()
-                .flatten()
-                .find(|offer| offer.id() == primary_selection_id)
+            self.offers.iter().flatten().find(|offer| offer.id() == primary_selection_id)
         } else {
             None
         }
@@ -67,12 +61,7 @@ impl WlOfferTracker {
         //     String::from_utf8_lossy(mime)
         // );
 
-        let Some(offer) = self
-            .offers
-            .iter_mut()
-            .flatten()
-            .find(|offer| offer.id() == id)
-        else {
+        let Some(offer) = self.offers.iter_mut().flatten().find(|offer| offer.id() == id) else {
             return Err(io::Error::new(io::ErrorKind::NotFound, "Offer not found"));
         };
         offer.push_offer(mime);
@@ -90,10 +79,7 @@ impl WlOfferTracker {
         Ok(previous_selection)
     }
 
-    pub fn primary_selection(
-        &mut self,
-        offer_id: &Option<u32>,
-    ) -> Result<Option<u32>, std::io::Error> {
+    pub fn primary_selection(&mut self, offer_id: &Option<u32>) -> Result<Option<u32>, std::io::Error> {
         // log_debug!(
         //     "Received DataControlDevice PrimarySelection with offer_id {:?}",
         //     offer_id
@@ -105,11 +91,7 @@ impl WlOfferTracker {
     }
 
     pub fn remove(&mut self, offer_id: u32) {
-        if let Some(slot) = self
-            .offers
-            .iter_mut()
-            .find(|o| o.as_ref().is_some_and(|o| o.id() == offer_id))
-        {
+        if let Some(slot) = self.offers.iter_mut().find(|o| o.as_ref().is_some_and(|o| o.id() == offer_id)) {
             *slot = None;
         }
     }

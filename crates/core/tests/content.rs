@@ -31,21 +31,14 @@ fn each_stored_type_adds_its_own_kind_and_the_ui_decides_what_they_mean() {
     use ContentKind::*;
     assert_kinds(&["text/plain;charset=utf-8"], &[Text]);
     // Plain characters whatever the encoding or text/* subtype.
-    assert_kinds(
-        &["UTF8_STRING", "text/plain;charset=utf-16", "text/csv"],
-        &[Text],
-    );
+    assert_kinds(&["UTF8_STRING", "text/plain;charset=utf-16", "text/csv"], &[Text]);
     // Formats with markup of their own are their own kinds, not Text.
     assert_kinds(&["text/html"], &[Html]);
     assert_kinds(&["text/markdown"], &[Markdown]);
     // A browser image copy, a file manager copy.
     assert_kinds(&["text/html", "image/png"], &[Html, Image]);
     assert_kinds(
-        &[
-            "text/plain;charset=utf-8",
-            "x-special/gnome-copied-files",
-            "text/uri-list",
-        ],
+        &["text/plain;charset=utf-8", "x-special/gnome-copied-files", "text/uri-list"],
         &[Text, File],
     );
     assert_kinds(&["image/webp"], &[Image]);
@@ -58,10 +51,7 @@ fn the_kde_cut_marker_alone_is_no_kind() {
     // It is a flag on a file list, not content.
     assert_kinds(&["application/x-kde-cutselection"], &[]);
     assert_kinds(&[], &[]);
-    assert_kinds(
-        &["text/uri-list", "application/x-kde-cutselection"],
-        &[ContentKind::File],
-    );
+    assert_kinds(&["text/uri-list", "application/x-kde-cutselection"], &[ContentKind::File]);
 }
 
 #[test]
@@ -87,18 +77,9 @@ fn every_kind_is_yielded_once_including_the_highest() {
 fn only_file_list_types_are_scanned() {
     use FileListFormat::*;
     assert_eq!(FileListFormat::from_mime("text/uri-list"), Some(UriList));
-    assert_eq!(
-        FileListFormat::from_mime("application/x-kde4-urilist"),
-        Some(UriList)
-    );
-    assert_eq!(
-        FileListFormat::from_mime("x-special/gnome-copied-files"),
-        Some(GnomeCopiedFiles)
-    );
-    assert_eq!(
-        FileListFormat::from_mime("application/x-kde-cutselection"),
-        None
-    );
+    assert_eq!(FileListFormat::from_mime("application/x-kde4-urilist"), Some(UriList));
+    assert_eq!(FileListFormat::from_mime("x-special/gnome-copied-files"), Some(GnomeCopiedFiles));
+    assert_eq!(FileListFormat::from_mime("application/x-kde-cutselection"), None);
     assert_eq!(FileListFormat::from_mime("text/plain"), None);
 }
 
@@ -119,11 +100,7 @@ fn count_any_split(format: FileListFormat, list: &[u8]) -> u32 {
         assert_eq!(count(format, &[a, b]), whole, "split at {i} of {list:?}");
         for j in i..=list.len() {
             let (b, c) = list[i..].split_at(j - i);
-            assert_eq!(
-                count(format, &[a, b, c]),
-                whole,
-                "split at {i}, {j} of {list:?}"
-            );
+            assert_eq!(count(format, &[a, b, c]), whole, "split at {i}, {j} of {list:?}");
         }
     }
     let bytes: Vec<&[u8]> = list.chunks(1).collect();
@@ -135,10 +112,7 @@ fn count_any_split(format: FileListFormat, list: &[u8]) -> u32 {
 fn a_gnome_list_counts_its_files_but_not_its_copy_or_cut_line() {
     use FileListFormat::GnomeCopiedFiles as G;
     // Nautilus and Thunar write no newline after the last file.
-    assert_eq!(
-        count_any_split(G, b"cut\nfile:///a\nfile:///b%20c\nfile:///d"),
-        3
-    );
+    assert_eq!(count_any_split(G, b"cut\nfile:///a\nfile:///b%20c\nfile:///d"), 3);
     assert_eq!(count_any_split(G, b"copy\nfile:///a\nfile:///b\n"), 2);
     assert_eq!(count_any_split(G, b"copy\nfile:///a"), 1);
     assert_eq!(count_any_split(G, b"copy"), 0);
@@ -152,17 +126,11 @@ fn a_gnome_list_counts_its_files_but_not_its_copy_or_cut_line() {
 fn a_uri_list_counts_its_lines_but_not_comments_or_empty_lines() {
     use FileListFormat::UriList as U;
     // RFC 2483: CRLF line ends, `#` comments.
-    assert_eq!(
-        count_any_split(U, b"# from dolphin\r\nfile:///a\r\nfile:///b\r\n"),
-        2
-    );
+    assert_eq!(count_any_split(U, b"# from dolphin\r\nfile:///a\r\nfile:///b\r\n"), 2);
     // LF only, no newline after the last one, empty and CR-only lines.
     assert_eq!(count_any_split(U, b"\nfile:///a\n\n\r\n\rfile:///b"), 2);
     // Any URI is an item; nothing is checked or decoded.
-    assert_eq!(
-        count_any_split(U, b"trash:///x\nsmb://host/share\n/not-a-uri\n"),
-        3
-    );
+    assert_eq!(count_any_split(U, b"trash:///x\nsmb://host/share\n/not-a-uri\n"), 3);
     assert_eq!(count_any_split(U, b"\r\n\r\n"), 0);
     assert_eq!(count_any_split(U, b"# only a comment"), 0);
     // The first line is an item here (only GNOME's first line is the copy/cut line).

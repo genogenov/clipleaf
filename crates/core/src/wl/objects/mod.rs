@@ -102,8 +102,10 @@ macro_rules! wl_str_bytes {
             let size = ((S.len() + 1) as u32).to_ne_bytes();
             let b = S.as_bytes();
             let mut r = [0u8; LEN];
-            r[0] = size[0]; r[1] = size[1];
-            r[2] = size[2]; r[3] = size[3];
+            r[0] = size[0];
+            r[1] = size[1];
+            r[2] = size[2];
+            r[3] = size[3];
             r[4 + S.len()] = 0; // null terminator
             let mut i = 0;
             while i < b.len() {
@@ -112,7 +114,11 @@ macro_rules! wl_str_bytes {
             }
             r
         };
-        WlStr { str: S, bytes: S.as_bytes(), wl_bytes: &RESULT }
+        WlStr {
+            str: S,
+            bytes: S.as_bytes(),
+            wl_bytes: &RESULT,
+        }
     }};
 }
 pub(crate) use wl_str_bytes;

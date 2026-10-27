@@ -25,8 +25,7 @@ pub mod types {
 
     pub const PREFERRED_TXT_LIKE_MIME_TYPES: [&str; 2] = [TEXT_HTML, TEXT_MARKDOWN];
 
-    pub const PREFERRED_FILE_LIST_MIME_TYPES: [&str; 3] =
-        [TEXT_URI_LIST, KDE_URI_LIST, GNOME_COPIED_FILES];
+    pub const PREFERRED_FILE_LIST_MIME_TYPES: [&str; 3] = [TEXT_URI_LIST, KDE_URI_LIST, GNOME_COPIED_FILES];
 
     pub const FILE_MIME_MODIFIER_TYPES: [&str; 1] = [KDE_CUT_MARKER];
 
@@ -197,45 +196,29 @@ pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) ->
     for m in mimes.iter() {
         match classify_mime(m) {
             Mime {
-                kind: MimeKind::Password,
-                ..
+                kind: MimeKind::Password, ..
             } => return Vec::new(),
             k @ Mime { kind, .. }
-                if (kind == MimeKind::Text
-                    || kind == MimeKind::TextLike
-                    || kind == MimeKind::TextExtended)
+                if (kind == MimeKind::Text || kind == MimeKind::TextLike || kind == MimeKind::TextExtended)
                     && text.as_ref().is_none_or(|a| k.is_preferred(a)) =>
             {
                 text = Some(k)
             }
-            k @ Mime { kind, .. }
-                if kind == MimeKind::Image && image.as_ref().is_none_or(|b| k.is_preferred(b)) =>
-            {
-                image = Some(k)
-            }
+            k @ Mime { kind, .. } if kind == MimeKind::Image && image.as_ref().is_none_or(|b| k.is_preferred(b)) => image = Some(k),
             k @ Mime {
-                kind: MimeKind::FileList,
-                ..
+                kind: MimeKind::FileList, ..
             } => files.push(k),
             k @ Mime {
                 kind: MimeKind::FileModifier,
                 ..
-            } if file_modifier.as_ref().is_none_or(|a| k.is_preferred(a)) => {
-                file_modifier = Some(k)
-            }
+            } if file_modifier.as_ref().is_none_or(|a| k.is_preferred(a)) => file_modifier = Some(k),
             // MimeKind::Other => rest.push(i),
             _ => {} // a lower-ranked alias or image
         }
     }
     let modifier = file_modifier.filter(|_| !files.is_empty());
     let cap = cap_known.saturating_sub(usize::from(modifier.is_some()));
-    let mut result: Vec<Mime<S>> = text
-        .into_iter()
-        .chain(image)
-        .chain(files)
-        .take(cap)
-        .map(|m| m.as_cloned_mime())
-        .collect();
+    let mut result: Vec<Mime<S>> = text.into_iter().chain(image).chain(files).take(cap).map(|m| m.as_cloned_mime()).collect();
     if let Some(modifier) = modifier
         && result.iter().any(|m| m.kind == MimeKind::FileList)
     {
@@ -250,19 +233,13 @@ pub fn parse_mime(bytes: &[u8]) -> std::io::Result<&str> {
     // Theoretical max given 4KB WL buffer - message: 8-byte header + 4-byte length + string + NUL, padded to 4 bytes.
     const MAX_LENGTH: usize = 4000;
 
-    let value = std::str::from_utf8(bytes).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to parse mime: {}", e),
-        )
-    })?;
+    let value =
+        std::str::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to parse mime: {}", e)))?;
 
     if value.is_empty() || value.len() > MAX_LENGTH || value.chars().any(|b| b.is_control()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!(
-                "invalid mime type - must be non-empty, at most {MAX_LENGTH} bytes, and contain no control characters"
-            ),
+            format!("invalid mime type - must be non-empty, at most {MAX_LENGTH} bytes, and contain no control characters"),
         ));
     }
     Ok(value)

@@ -38,12 +38,7 @@ fn png_rgba(width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 4]) -> Vec
 }
 
 /// A baseline JPEG; with `orientation`, an EXIF APP1 segment holding only that tag.
-fn jpeg(
-    width: u16,
-    height: u16,
-    orientation: Option<u16>,
-    pixel: impl Fn(u32, u32) -> [u8; 3],
-) -> Vec<u8> {
+fn jpeg(width: u16, height: u16, orientation: Option<u16>, pixel: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
     for y in 0..height as u32 {
         for x in 0..width as u32 {
@@ -59,8 +54,7 @@ fn jpeg(
         exif.extend([0, 0, 0, 0, 0, 0]); // value padding, no next IFD
         enc.add_app_segment(1, exif).unwrap();
     }
-    enc.encode(&rgb, width, height, jpeg_encoder::ColorType::Rgb)
-        .unwrap();
+    enc.encode(&rgb, width, height, jpeg_encoder::ColorType::Rgb).unwrap();
     out
 }
 
@@ -143,10 +137,7 @@ fn zero_png(width: u32, height: u32) -> Vec<u8> {
 
 fn decode(thumb: &Thumb) -> RgbImage {
     let img = image::load_from_memory_with_format(&thumb.jpeg, ImageFormat::Jpeg).unwrap();
-    assert_eq!(
-        (img.width(), img.height()),
-        (thumb.width as u32, thumb.height as u32)
-    );
+    assert_eq!((img.width(), img.height()), (thumb.width as u32, thumb.height as u32));
     img.to_rgb8()
 }
 
@@ -154,10 +145,7 @@ fn decode(thumb: &Thumb) -> RgbImage {
 fn assert_near(img: &RgbImage, x: u32, y: u32, want: [u8; 3]) {
     let got = img.get_pixel(x, y).0;
     let close = got.iter().zip(want).all(|(&g, w)| g.abs_diff(w) <= 24);
-    assert!(
-        close,
-        "pixel ({x}, {y}) is {got:?}, expected about {want:?}"
-    );
+    assert!(close, "pixel ({x}, {y}) is {got:?}, expected about {want:?}");
 }
 
 fn halves(split_at: u32) -> impl Fn(u32, u32) -> [u8; 3] {
@@ -194,13 +182,7 @@ fn an_image_smaller_than_the_box_keeps_its_size() {
 fn transparency_is_shown_on_a_light_checkerboard_of_8_px_squares() {
     // The left half is fully transparent red: the red must not show. The right half is opaque.
     let mut daemon = Daemon::start();
-    let png = png_rgba(64, 64, |x, _| {
-        if x < 32 {
-            [255, 0, 0, 0]
-        } else {
-            [BLUE[0], BLUE[1], BLUE[2], 255]
-        }
-    });
+    let png = png_rgba(64, 64, |x, _| if x < 32 { [255, 0, 0, 0] } else { [BLUE[0], BLUE[1], BLUE[2], 255] });
     let entry = daemon.copy_new(&[(PNG, &png)]);
     let thumb = daemon.wait_thumb(entry.id).expect("a thumbnail");
     assert!(thumb.has_alpha);
@@ -301,11 +283,7 @@ fn an_image_whose_thumbnail_was_lost_in_a_crash_gets_it_after_the_restart() {
     assert_eq!(daemon.wait_thumb(lost.id), Some(before));
     // Both workers are idle at startup: a job for the marked image (a 12-byte non-image) would
     // have failed long before the 256×256 decode finished.
-    assert!(
-        daemon.thumbs().iter().all(|(id, ..)| *id != no_thumb.id),
-        "{:?}",
-        daemon.thumbs()
-    );
+    assert!(daemon.thumbs().iter().all(|(id, ..)| *id != no_thumb.id), "{:?}", daemon.thumbs());
 }
 
 #[test]
@@ -361,10 +339,7 @@ fn both_image_workers_run_10_nice_levels_below_the_daemon() {
         if workers == [want, want] {
             break;
         }
-        assert!(
-            started.elapsed() < WAIT,
-            "worker nice {workers:?}, expected {want}"
-        );
+        assert!(started.elapsed() < WAIT, "worker nice {workers:?}, expected {want}");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }

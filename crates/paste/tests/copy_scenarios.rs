@@ -37,9 +37,7 @@ fn owner(comp: &TestCompositor, mimes: &[&str], primary: bool) -> Owner {
         session.set_selection(source.local_id).unwrap();
     }
     let callback_id = session.schedule_sync().unwrap();
-    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
-    {
-    }
+    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id) {}
     Owner { session }
 }
 
@@ -48,9 +46,7 @@ impl Owner {
     /// must already be running (or about to run): this blocks until it asks.
     fn serve(&mut self, payload: &[u8]) -> String {
         loop {
-            if let WlSessionEvent::DataControlSend { mime, fd, .. } =
-                self.session.next_event().unwrap()
-            {
+            if let WlSessionEvent::DataControlSend { mime, fd, .. } = self.session.next_event().unwrap() {
                 // The paster may stop reading early (broken pipe): not this side's problem.
                 let _ = serve_bytes(fd, payload);
                 return String::from_utf8(mime.into_vec()).unwrap();
@@ -64,12 +60,7 @@ fn paste_command(comp: &TestCompositor, args: &[&str]) -> Command {
 }
 
 /// Pastes with `args` while `owner` serves `payload`; returns the output and the type asked for.
-fn paste(
-    comp: &TestCompositor,
-    owner: &mut Owner,
-    args: &[&str],
-    payload: &[u8],
-) -> (Output, String) {
+fn paste(comp: &TestCompositor, owner: &mut Owner, args: &[&str], payload: &[u8]) -> (Output, String) {
     let mut command = paste_command(comp, args);
     command.stdout(Stdio::piped());
     let mut started = bins::start(comp, command, None);
@@ -117,15 +108,9 @@ fn the_primary_selection_is_independent_of_the_clipboard() {
     let mut prim = owner(&comp, &["text/html"], true);
 
     let (output, asked) = paste(&comp, &mut clip, &[], b"clip");
-    assert_eq!(
-        (output.stdout, asked.as_str()),
-        (b"clip".to_vec(), "text/plain")
-    );
+    assert_eq!((output.stdout, asked.as_str()), (b"clip".to_vec(), "text/plain"));
     let (output, asked) = paste(&comp, &mut prim, &["--primary"], b"<b>prim</b>");
-    assert_eq!(
-        (output.stdout, asked.as_str()),
-        (b"<b>prim</b>".to_vec(), "text/html")
-    );
+    assert_eq!((output.stdout, asked.as_str()), (b"<b>prim</b>".to_vec(), "text/html"));
     let output = bins::run(PASTE, &comp, &["-l", "-p"]);
     assert_eq!(output.stdout, b"text/html\n");
     let output = bins::run(PASTE, &comp, &["-l"]);
@@ -152,14 +137,8 @@ fn a_type_that_is_not_offered_fails_and_lists_what_is() {
     assert!(!output.status.success());
     assert_eq!(output.stdout, b"");
     let err = stderr(&output);
-    assert!(
-        err.contains("image/jpeg") && err.contains("not available"),
-        "{err}"
-    );
-    assert!(
-        err.contains("text/plain") && err.contains("image/png"),
-        "{err}"
-    );
+    assert!(err.contains("image/jpeg") && err.contains("not available"), "{err}");
+    assert!(err.contains("text/plain") && err.contains("image/png"), "{err}");
     // Nothing was asked of the owner. The disconnect of the paster (client 2, after the owner)
     // is reported only after all of its requests were dispatched, so every `receive` it made
     // has produced its note by then.
@@ -176,18 +155,10 @@ fn nothing_to_paste_is_an_error_for_paste_and_for_list() {
     let comp = compositor();
     let output = bins::run(PASTE, &comp, &[]);
     assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("nothing found to paste"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("nothing found to paste"), "{}", stderr(&output));
     let output = bins::run(PASTE, &comp, &["-l"]);
     assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("No offered MIME types"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("No offered MIME types"), "{}", stderr(&output));
 }
 
 #[test]
@@ -198,11 +169,7 @@ fn an_owner_that_went_away_leaves_nothing_to_paste() {
     comp.wait_cleared(false);
     let output = bins::run(PASTE, &comp, &[]);
     assert!(!output.status.success());
-    assert!(
-        stderr(&output).contains("nothing found to paste"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("nothing found to paste"), "{}", stderr(&output));
 }
 
 fn read_back(file: &mut File) -> Vec<u8> {
@@ -216,9 +183,7 @@ fn read_back(file: &mut File) -> Vec<u8> {
 fn a_big_binary_payload_arrives_byte_exact() {
     let comp = compositor();
     let mut owner = owner(&comp, &["application/octet-stream"], false);
-    let payload: Vec<u8> = (0..(8u32 << 20))
-        .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
-        .collect();
+    let payload: Vec<u8> = (0..(8u32 << 20)).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
     // A file, not a pipe: this thread serves the paste and cannot also drain a stdout pipe.
     let mut out = tempfile();
     let mut command = paste_command(&comp, &["-t", "application/octet-stream"]);
@@ -251,17 +216,8 @@ fn a_reader_that_stops_reading_ends_the_paste_quietly() {
 
 fn tempfile() -> File {
     let dir = std::env::temp_dir();
-    let path = dir.join(format!(
-        "clipleaf-paste-test-{}-{}",
-        std::process::id(),
-        next_id()
-    ));
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
+    let path = dir.join(format!("clipleaf-paste-test-{}-{}", std::process::id(), next_id()));
+    let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).unwrap();
     std::fs::remove_file(&path).unwrap();
     file
 }
@@ -287,10 +243,7 @@ fn a_usage_error_is_exit_code_1_with_the_message_and_usage_on_stderr() {
         assert_eq!(output.status.code(), Some(1), "{args:?}");
         assert_eq!(output.stdout, b"", "{args:?}");
         let err = stderr(&output);
-        assert!(
-            err.contains(named) && err.contains("Usage:"),
-            "{args:?}: {err}"
-        );
+        assert!(err.contains(named) && err.contains("Usage:"), "{args:?}: {err}");
     }
 }
 
@@ -300,10 +253,7 @@ fn help_goes_to_stdout_with_exit_code_0_even_without_a_compositor() {
         let output = bins::bare(PASTE, args).output().unwrap();
         assert!(output.status.success(), "{args:?}");
         let out = String::from_utf8(output.stdout).unwrap();
-        assert!(
-            out.contains("Usage:") && out.contains("--no-newline"),
-            "{out}"
-        );
+        assert!(out.contains("Usage:") && out.contains("--no-newline"), "{out}");
     }
 }
 
@@ -313,21 +263,14 @@ fn help_goes_to_stdout_with_exit_code_0_even_without_a_compositor() {
 fn without_a_wayland_environment_it_says_what_is_missing() {
     let output = bins::bare(PASTE, &[]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("XDG_RUNTIME_DIR is not set"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("XDG_RUNTIME_DIR is not set"), "{}", stderr(&output));
 }
 
 #[test]
 fn a_display_that_does_not_exist_names_the_socket_it_tried() {
     let comp = compositor();
     let missing = comp.runtime_dir().join("no-such-display");
-    let output = bins::bare(PASTE, &[])
-        .env("WAYLAND_DISPLAY", &missing)
-        .output()
-        .unwrap();
+    let output = bins::bare(PASTE, &[]).env("WAYLAND_DISPLAY", &missing).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     let err = stderr(&output);
     assert!(
@@ -344,11 +287,7 @@ fn a_compositor_without_data_control_is_reported_by_protocol_name() {
     });
     let output = bins::run(PASTE, &comp, &[]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("ext_data_control_manager_v1"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("ext_data_control_manager_v1"), "{}", stderr(&output));
 }
 
 // ---- the terminal newline: appended only for text types, and not with -n ----
@@ -398,9 +337,6 @@ fn on_a_terminal_text_gets_a_trailing_newline_but_not_with_n_and_not_other_types
     // The terminal turns the newline into CR LF.
     assert_eq!(paste_on_a_tty(&[], &["text/plain"], b"hello"), b"hello\r\n");
     assert_eq!(paste_on_a_tty(&["-n"], &["text/plain"], b"hello"), b"hello");
-    assert_eq!(
-        paste_on_a_tty(&["--no-newline"], &["text/plain"], b"hello"),
-        b"hello"
-    );
+    assert_eq!(paste_on_a_tty(&["--no-newline"], &["text/plain"], b"hello"), b"hello");
     assert_eq!(paste_on_a_tty(&[], &["image/png"], b"PNG"), b"PNG");
 }

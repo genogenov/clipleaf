@@ -8,9 +8,7 @@ use std::{
     os::fd::OwnedFd,
 };
 
-use clipleaf_core::{
-    WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::TEXT_MIME_TYPES,
-};
+use clipleaf_core::{WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::TEXT_MIME_TYPES};
 use clipleaf_test_common::{Config, Note, TestCompositor, compositor, compositor_with, fds};
 
 fn session(comp: &TestCompositor) -> WlSessionManager {
@@ -20,9 +18,7 @@ fn session(comp: &TestCompositor) -> WlSessionManager {
 
 fn until_sync(s: &mut WlSessionManager) {
     let callback_id = s.schedule_sync().unwrap();
-    while !matches!(s.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id)
-    {
-    }
+    while !matches!(s.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id) {}
 }
 
 /// An owner that offers `mimes` as the clipboard (or primary) and has synced.
@@ -57,10 +53,7 @@ fn an_owner_serves_a_paster_through_the_relay() {
 
     let mut paster = session(&comp);
     until_sync(&mut paster);
-    assert_eq!(
-        paster.get_offer().unwrap().offered_mime_types(),
-        ["text/plain"]
-    );
+    assert_eq!(paster.get_offer().unwrap().offered_mime_types(), ["text/plain"]);
     let (mut reader, writer) = fds::channel();
     let asked = paster.receive_offer(false, None, writer).unwrap();
     assert_eq!(asked.map(|m| m.as_ref()), Some("text/plain"));
@@ -80,8 +73,7 @@ fn events_until_sync(s: &mut WlSessionManager) -> Vec<WlSessionEvent> {
     let mut events = Vec::new();
     loop {
         let event = s.next_event().unwrap();
-        let done =
-            matches!(event, WlSessionEvent::SyncDone { callback_id: id } if id == callback_id);
+        let done = matches!(event, WlSessionEvent::SyncDone { callback_id: id } if id == callback_id);
         events.push(event);
         if done {
             return events;
@@ -98,18 +90,16 @@ fn replacing_the_selection_cancels_the_previous_owner_and_only_that_one() {
     // The cancel was queued for the first owner before the second one's sync was answered.
     let events = events_until_sync(&mut owner);
     assert!(
-        events.iter().any(
-            |e| matches!(e, WlSessionEvent::DataControlCancelled { source: id } if *id == source)
-        ),
+        events
+            .iter()
+            .any(|e| matches!(e, WlSessionEvent::DataControlCancelled { source: id } if *id == source)),
         "the first owner was not cancelled"
     );
     comp.wait_for(|n| matches!(n, Note::Cancelled { primary: false }));
     // The new owner is still current: nothing cancelled it.
     let events = events_until_sync(&mut second);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, WlSessionEvent::DataControlCancelled { .. })),
+        !events.iter().any(|e| matches!(e, WlSessionEvent::DataControlCancelled { .. })),
         "the new owner was cancelled"
     );
 }
@@ -122,14 +112,8 @@ fn the_clipboard_and_the_primary_selection_are_independent() {
 
     let mut paster = session(&comp);
     until_sync(&mut paster);
-    assert_eq!(
-        paster.get_offer().unwrap().offered_mime_types(),
-        ["text/plain"]
-    );
-    assert_eq!(
-        paster.get_primary_offer().unwrap().offered_mime_types(),
-        ["text/html"]
-    );
+    assert_eq!(paster.get_offer().unwrap().offered_mime_types(), ["text/plain"]);
+    assert_eq!(paster.get_primary_offer().unwrap().offered_mime_types(), ["text/html"]);
 }
 
 #[test]
@@ -144,16 +128,12 @@ fn an_owner_that_disconnects_clears_the_selection() {
     comp.wait_cleared(false);
     let events = events_until_sync(&mut paster);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, WlSessionEvent::Selection { offer_id: None })),
+        events.iter().any(|e| matches!(e, WlSessionEvent::Selection { offer_id: None })),
         "the paster was not told the selection is gone"
     );
     assert!(paster.get_offer().is_none());
     let (_reader, writer) = fds::channel();
-    let err = paster
-        .receive_offer(false, None, writer)
-        .expect_err("must fail");
+    let err = paster.receive_offer(false, None, writer).expect_err("must fail");
     assert!(err.to_string().contains("nothing found to paste"), "{err}");
 }
 
@@ -170,10 +150,7 @@ fn a_new_selection_reaches_a_paster_that_is_already_listening() {
             break;
         }
     }
-    assert_eq!(
-        paster.get_offer().unwrap().offered_mime_types(),
-        TEXT_MIME_TYPES
-    );
+    assert_eq!(paster.get_offer().unwrap().offered_mime_types(), TEXT_MIME_TYPES);
 }
 
 #[test]
@@ -202,11 +179,7 @@ fn selection_churn_destroys_every_replaced_offer_at_the_compositor() {
     paster.flush().unwrap();
     until_sync(&mut paster);
     // The relay processed every destroy before it answered the sync, so all are queued by now.
-    let destroyed = comp
-        .notes
-        .try_iter()
-        .filter(|n| matches!(n, Note::OfferDestroyed))
-        .count();
+    let destroyed = comp.notes.try_iter().filter(|n| matches!(n, Note::OfferDestroyed)).count();
     // Per round after the first: the paster destroys the offer it replaces, and so does the new
     // owner, whose own selection replaces the previous owner's offer it was handed at bind.
     assert_eq!(destroyed, 2 * (rounds - 1));
@@ -218,9 +191,7 @@ fn raw_requests_pass_the_relays_parser_and_a_big_offer_list_survives_overflow() 
     // 100 types of ~40 bytes overflow the 4096-byte write buffer; the relay (a different
     // implementation) must see every one of them, in order.
     let comp = compositor();
-    let mimes: Vec<String> = (0..100)
-        .map(|i| format!("application/x-clipleaf-test-{i:03}"))
-        .collect();
+    let mimes: Vec<String> = (0..100).map(|i| format!("application/x-clipleaf-test-{i:03}")).collect();
     let refs: Vec<&str> = mimes.iter().map(String::as_str).collect();
     let (_owner, _) = owner_of(&comp, &refs, false);
     assert_eq!(comp.wait_selection(false), mimes);
@@ -236,10 +207,7 @@ fn initialize_without_ext_data_control_names_the_missing_protocol() {
     let Err(err) = WlSessionManager::initialize(stream) else {
         panic!("initialized without ext_data_control_manager_v1");
     };
-    assert!(
-        err.to_string().contains("ext_data_control_manager_v1"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("ext_data_control_manager_v1"), "{err}");
 }
 
 #[test]
@@ -272,22 +240,15 @@ fn a_receive_on_an_offer_the_device_no_longer_holds_is_not_forwarded() {
     // (The paster ignores the news that came meanwhile; only the old offer matters here.)
     let callback_id = paster.schedule_sync().unwrap();
     comp.wait_for(|n| matches!(n, Note::Selection { mimes: Some(_), .. }));
-    while !matches!(paster.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id)
-    {
-    }
+    while !matches!(paster.next_event().unwrap(), WlSessionEvent::SyncDone { callback_id: id } if id == callback_id) {}
     assert!(
-        !comp
-            .notes
-            .try_iter()
-            .any(|n| matches!(n, Note::Forwarded { .. })),
+        !comp.notes.try_iter().any(|n| matches!(n, Note::Forwarded { .. })),
         "a receive on a replaced offer was forwarded"
     );
     assert_eq!(fds::read_to_eof(&mut reader), b"");
     let events = events_until_sync(&mut first_owner);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, WlSessionEvent::DataControlSend { .. })),
+        !events.iter().any(|e| matches!(e, WlSessionEvent::DataControlSend { .. })),
         "the old owner was asked to serve"
     );
 }

@@ -74,15 +74,7 @@ impl FetchJobDispatcher {
         let tx = self.index_tx.clone();
         let max_idle = self.idle_timeout;
         jobs.start("fetch-selection", move |cancel| {
-            fetch(
-                (pipes, fetch_mimes),
-                entry,
-                cancel,
-                max_idle,
-                tx,
-                id_seq,
-                now_ms,
-            )
+            fetch((pipes, fetch_mimes), entry, cancel, max_idle, tx, id_seq, now_ms)
         })
         .map(Some)
     }
@@ -114,21 +106,17 @@ fn fetch(
     loop {
         let poll_result = {
             let mut fds = iter::once(cancel_poll)
-                .chain(fetch_ops.iter().filter_map(|o| {
-                    o.pipe
-                        .as_ref()
-                        .map(|p| PollFd::new(p.as_fd(), PollEvents::IN))
-                }))
+                .chain(
+                    fetch_ops
+                        .iter()
+                        .filter_map(|o| o.pipe.as_ref().map(|p| PollFd::new(p.as_fd(), PollEvents::IN))),
+                )
                 .collect::<Vec<_>>();
 
             if fds.len() == 1 {
                 // Every pipe reached EOF: a read error returns early (never partial).
                 let entry = entry.create();
-                let result: Vec<(Cow<'_, str>, u64)> = entry
-                    .types
-                    .iter()
-                    .map(|op| (op.mime.mime().clone(), op.size))
-                    .collect();
+                let result: Vec<(Cow<'_, str>, u64)> = entry.types.iter().map(|op| (op.mime.mime().clone(), op.size)).collect();
 
                 if !result.is_empty() {
                     let (done_tx, done_rx) = mpsc::sync_channel(1);
@@ -138,9 +126,7 @@ fn fetch(
                         entry,
                         done_signal: done_tx,
                     }) {
-                        return JobOutcome::Failed(io::Error::other(format!(
-                            "Failed to send msg to Indexer: {e}"
-                        )));
+                        return JobOutcome::Failed(io::Error::other(format!("Failed to send msg to Indexer: {e}")));
                     }
                     // just as long as the index completed - one way or another.
                     let _ = done_rx.recv();
@@ -163,13 +149,8 @@ fn fetch(
                 if revents[0].has_any(PollEvents::IN) {
                     return JobOutcome::Cancelled;
                 }
-                for (i, op) in fetch_ops
-                    .iter_mut()
-                    .filter(|op| op.pipe.is_some())
-                    .enumerate()
-                {
-                    let active =
-                        revents[i + 1].has_any(PollEvents::IN | PollEvents::HUP | PollEvents::ERR);
+                for (i, op) in fetch_ops.iter_mut().filter(|op| op.pipe.is_some()).enumerate() {
+                    let active = revents[i + 1].has_any(PollEvents::IN | PollEvents::HUP | PollEvents::ERR);
                     if active {
                         let reader = op.pipe.as_mut().unwrap();
                         let writer = op.writer.as_mut().unwrap();
@@ -185,11 +166,7 @@ fn fetch(
                                 }
                             }
                             Err(e) => {
-                                log_error!(
-                                    "Failed to read from pipe for mime type {} : {}",
-                                    writer.mime().mime(),
-                                    e
-                                );
+                                log_error!("Failed to read from pipe for mime type {} : {}", writer.mime().mime(), e);
                                 return JobOutcome::Failed(e);
                             }
                         }
@@ -229,11 +206,7 @@ mod tests {
     impl Dir {
         fn new() -> Self {
             static N: AtomicU32 = AtomicU32::new(0);
-            let p = std::env::temp_dir().join(format!(
-                "clipleafd-fetch-{}-{}",
-                std::process::id(),
-                N.fetch_add(1, Ordering::Relaxed)
-            ));
+            let p = std::env::temp_dir().join(format!("clipleafd-fetch-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
             fs::create_dir_all(&p).unwrap();
             Dir(p)
         }
@@ -242,10 +215,7 @@ mod tests {
                 .unwrap()
                 .map(|e| {
                     let e = e.unwrap();
-                    (
-                        e.file_name().into_string().unwrap(),
-                        e.metadata().unwrap().len(),
-                    )
+                    (e.file_name().into_string().unwrap(), e.metadata().unwrap().len())
                 })
                 .collect();
             v.sort();
@@ -267,24 +237,14 @@ mod tests {
         names
             .iter()
             .map(|n| {
-                let kind = if n.starts_with("image/") {
-                    MimeKind::Image
-                } else {
-                    MimeKind::Text
-                };
+                let kind = if n.starts_with("image/") { MimeKind::Image } else { MimeKind::Text };
                 Mime::new(Cow::Borrowed(*n), kind, Some(0))
             })
             .collect()
     }
 
     // Runs one fetch into `dir`; returns the outcome and the entry sent to the index, if any.
-    fn run(
-        dir: &Dir,
-        readers: Vec<PipeReader>,
-        names: &[&'static str],
-        cancel: &EventFd,
-        idle: Duration,
-    ) -> (JobOutcome, Option<Entry>) {
+    fn run(dir: &Dir, readers: Vec<PipeReader>, names: &[&'static str], cancel: &EventFd, idle: Duration) -> (JobOutcome, Option<Entry>) {
         let (tx, rx): (Sender<IndexMsg>, Receiver<IndexMsg>) = mpsc::channel();
         // Stands in for the index thread: fetch waits until the index is done with its Insert
         // (done_signal dropped here). No Insert: fetch drops tx on return and recv gets Err.
@@ -319,13 +279,7 @@ mod tests {
         let _silent = writers; // stays open, never written
 
         let cancel = EventFd::new().unwrap();
-        let (outcome, sent) = run(
-            &dir,
-            readers,
-            &["text/plain", "image/png"],
-            &cancel,
-            Duration::from_millis(50),
-        );
+        let (outcome, sent) = run(&dir, readers, &["text/plain", "image/png"], &cancel, Duration::from_millis(50));
         assert!(matches!(outcome, JobOutcome::TimedOut), "{outcome:?}");
         assert!(sent.is_none());
         assert!(dir.files().is_empty(), "{:?}", dir.files());
@@ -365,13 +319,7 @@ mod tests {
             }
         });
         let cancel = EventFd::new().unwrap();
-        let (outcome, _sent) = run(
-            &dir,
-            readers,
-            &["text/plain"],
-            &cancel,
-            Duration::from_millis(300),
-        );
+        let (outcome, _sent) = run(&dir, readers, &["text/plain"], &cancel, Duration::from_millis(300));
         source.join().unwrap();
         assert_eq!(fetched(outcome), [("text/plain".into(), 30)]);
     }

@@ -34,14 +34,9 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
                 out.list_types = true;
             }
             b"-n" | b"--no-newline" => out.no_newline = true,
-            b"-t" | b"--type" => {
-                out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?)
-            }
+            b"-t" | b"--type" => out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?),
             _ => {
-                return Err(usage_error(
-                    &program,
-                    &format!("unknown option '{}'", arg.display()),
-                ));
+                return Err(usage_error(&program, &format!("unknown option '{}'", arg.display())));
             }
         }
     }
@@ -49,25 +44,18 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
     log_debug!("Args parsed: {:?}", out);
 
     if out.list_types {
-        return Ok(Command::ListTypes {
-            primary: out.primary,
-        });
+        return Ok(Command::ListTypes { primary: out.primary });
     }
 
     Ok(Command::Paste(out))
 }
 
 fn usage_error(program_cmd: &OsString, error: &str) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("{}\n{}", error, usage(program_cmd),),
-    )
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}\n{}", error, usage(program_cmd),))
 }
 
 pub(crate) fn usage(program_cmd: &OsString) -> String {
-    let Colors {
-        bold, cyan, reset, ..
-    } = &LOGGER.colors;
+    let Colors { bold, cyan, reset, .. } = &LOGGER.colors;
     format!(
         concat!(
             "\n",
@@ -88,26 +76,12 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
 }
 
 fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Result<OsString> {
-    next.ok_or_else(|| {
-        usage_error(
-            program,
-            &format!("expected a value for option '{}'", option),
-        )
-    })
+    next.ok_or_else(|| usage_error(program, &format!("expected a value for option '{}'", option)))
 }
 
-fn parse_mime_from_args(
-    next: Option<OsString>,
-    program: &OsString,
-    option: &impl Display,
-) -> Result<String> {
+fn parse_mime_from_args(next: Option<OsString>, program: &OsString, option: &impl Display) -> Result<String> {
     let arg_value = value(next, program, option)?;
-    let value = parse_mime(arg_value.as_bytes()).map_err(|e| {
-        usage_error(
-            program,
-            &format!("invalid mime type for option '{}' - {e}", option),
-        )
-    })?;
+    let value = parse_mime(arg_value.as_bytes()).map_err(|e| usage_error(program, &format!("invalid mime type for option '{}' - {e}", option)))?;
 
     Ok(value.to_owned())
 }
@@ -160,10 +134,7 @@ mod tests {
             assert!(paste_args(&[flag]).no_newline);
         }
         for flag in ["-t", "--type"] {
-            assert_eq!(
-                paste_args(&[flag, "image/png"]).mime.as_deref(),
-                Some("image/png")
-            );
+            assert_eq!(paste_args(&[flag, "image/png"]).mime.as_deref(), Some("image/png"));
         }
         let parsed = paste_args(&["-n", "-p", "-t", "text/html"]);
         assert!(parsed.no_newline && parsed.primary);
@@ -172,20 +143,11 @@ mod tests {
 
     #[test]
     fn list_types_keeps_the_selection_choice() {
-        for args in [
-            &["-l"][..],
-            &["--list-types"],
-            &["-p", "-l"],
-            &["-l", "--primary"],
-        ] {
+        for args in [&["-l"][..], &["--list-types"], &["-p", "-l"], &["-l", "--primary"]] {
             let Ok(Command::ListTypes { primary }) = parse(args) else {
                 panic!("{args:?} did not list types");
             };
-            assert_eq!(
-                primary,
-                args.iter()
-                    .any(|a| a.starts_with("-p") || *a == "--primary")
-            );
+            assert_eq!(primary, args.iter().any(|a| a.starts_with("-p") || *a == "--primary"));
         }
     }
 

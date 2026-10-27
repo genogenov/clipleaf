@@ -16,10 +16,7 @@ use common::*;
 fn a_copy_is_fetched_as_its_best_text_and_image_and_kept_with_their_sizes() {
     let mut daemon = Daemon::start();
     let a = daemon.new_offer();
-    daemon.send(&[
-        offer(a, &["text/html", UTF8, PNG, "application/x-foo"]),
-        selection(a),
-    ]);
+    daemon.send(&[offer(a, &["text/html", UTF8, PNG, "application/x-foo"]), selection(a)]);
 
     let receives = daemon.receives_until(a);
     let mimes: Vec<&str> = receives.iter().map(|r| r.mime.as_str()).collect();
@@ -55,11 +52,7 @@ fn exactly_the_inline_limit_stays_inline_and_one_byte_more_gets_a_file() {
     let inline = daemon.copy_new(&[(UTF8, &vec![b'x'; 5 * 1024])]);
     assert!(!inline.types[0].in_file);
     assert_eq!(inline.types[0].head, vec![b'x'; 5 * 1024]);
-    assert!(
-        state.payload_files().is_empty(),
-        "{:?}",
-        state.payload_files()
-    );
+    assert!(state.payload_files().is_empty(), "{:?}", state.payload_files());
 
     let file = daemon.copy_new(&[(UTF8, &vec![b'y'; 5 * 1024 + 1])]);
     assert!(file.types[0].in_file);
@@ -120,10 +113,7 @@ fn a_burst_of_copies_in_one_read_fetches_only_the_last() {
 fn password_manager_copies_and_the_primary_selection_are_not_fetched() {
     let mut daemon = Daemon::start();
     let p = daemon.new_offer();
-    daemon.send(&[
-        offer(p, &[UTF8]),
-        wire::msg(DEVICE, DEVICE_PRIMARY_SELECTION, &p.to_ne_bytes()),
-    ]);
+    daemon.send(&[offer(p, &[UTF8]), wire::msg(DEVICE, DEVICE_PRIMARY_SELECTION, &p.to_ne_bytes())]);
     // A copy that is fetched: a receive for P, sent first, would fail this copy's check that
     // every receive is its own.
     let x = daemon.new_offer();

@@ -55,9 +55,7 @@ impl InFdBuffer {
     pub fn push_in_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
         if self.in_fd_count >= self.in_fds.len() {
-            return Err(std::io::Error::other(
-                "Not enough space in buffer for file descriptors",
-            ));
+            return Err(std::io::Error::other("Not enough space in buffer for file descriptors"));
         }
         self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = Some(fd);
         self.in_fd_count += 1;
@@ -79,9 +77,7 @@ impl OutFdBuffer {
 
     pub fn push_out_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
         if self.out_fd_count >= self.out_fds.len() {
-            return Err(std::io::Error::other(
-                "Not enough space in output buffer for file descriptors",
-            ));
+            return Err(std::io::Error::other("Not enough space in output buffer for file descriptors"));
         }
         self.out_fds[self.out_fd_count] = Some(fd);
         self.out_fd_count += 1;
@@ -111,11 +107,7 @@ pub fn serve_bytes(out: OwnedFd, payload: &[u8]) -> std::io::Result<()> {
     out.write_all(payload)
 }
 
-pub fn serve_bytes_nonblocking(
-    out: OwnedFd,
-    payload: &[u8],
-    stall_timeout: Duration,
-) -> std::io::Result<()> {
+pub fn serve_bytes_nonblocking(out: OwnedFd, payload: &[u8], stall_timeout: Duration) -> std::io::Result<()> {
     let (_, mut out) = prepare_out_fd(out, payload.len() as u64, true)?;
     write_all_nonblocking(&mut out, payload, stall_timeout)
 }
@@ -143,12 +135,7 @@ pub fn serve_file(out: OwnedFd, payload: &File, payload_len: u64) -> std::io::Re
     Ok(())
 }
 
-pub fn serve_file_nonblocking(
-    out: OwnedFd,
-    payload: &File,
-    payload_len: u64,
-    stall_timeout: Duration,
-) -> std::io::Result<()> {
+pub fn serve_file_nonblocking(out: OwnedFd, payload: &File, payload_len: u64, stall_timeout: Duration) -> std::io::Result<()> {
     let (is_pipe, mut out) = prepare_out_fd(out, payload_len, true)?;
 
     if is_pipe {
@@ -169,20 +156,13 @@ pub fn serve_file_nonblocking(
     Ok(())
 }
 
-fn write_all_nonblocking(
-    out: &mut File,
-    payload: &[u8],
-    stall_timeout: Duration,
-) -> io::Result<()> {
+fn write_all_nonblocking(out: &mut File, payload: &[u8], stall_timeout: Duration) -> io::Result<()> {
     let mut written = 0;
     while written < payload.len() {
         match out.write(&payload[written..]) {
             Ok(w) => {
                 if w == 0 {
-                    return Err(io::Error::new(
-                        ErrorKind::WriteZero,
-                        "pipe accepted no data",
-                    ));
+                    return Err(io::Error::new(ErrorKind::WriteZero, "pipe accepted no data"));
                 }
                 written += w;
             }
@@ -203,19 +183,12 @@ fn write_all_nonblocking(
 fn wait_writable(out: BorrowedFd, stall: Duration) -> io::Result<()> {
     let mut fds = [PollFd::new(out, PollEvents::OUT)];
     match poll(&mut fds, Some(stall))? {
-        PollResult::Timeout => Err(io::Error::new(
-            ErrorKind::TimedOut,
-            "paster stopped reading",
-        )),
+        PollResult::Timeout => Err(io::Error::new(ErrorKind::TimedOut, "paster stopped reading")),
         PollResult::Ready(_) => Ok(()),
     }
 }
 
-fn prepare_out_fd(
-    out: OwnedFd,
-    payload_len: u64,
-    nonblocking: bool,
-) -> std::io::Result<(bool, File)> {
+fn prepare_out_fd(out: OwnedFd, payload_len: u64, nonblocking: bool) -> std::io::Result<(bool, File)> {
     // We do this to set O_NONBLOCK to ensure (non)blocking writes.
     if let Err(e) = set_nonblocking(out.as_fd(), nonblocking) {
         // Treat only setting the "nonblocking" as hard err.
@@ -241,12 +214,7 @@ fn prepare_out_fd(
 // Use a 2 stage splice to do zero(user space) copy from the payload file to the output pipe.
 // Two stages overlap the page-cache lookup of our file with the paster draining its pipe: ~20% faster on tmpfs for 100 MiB.
 // A direct splice keeps the paster's pipe locked during that lookup, so we and the paster take turns (~100 waits per 100 MiB assuming 1MB pipe).
-fn write_all_two_stage_splice(
-    out: &File,
-    payload: &File,
-    len: u64,
-    nonblock_stall_timeout: Option<Duration>,
-) -> io::Result<()> {
+fn write_all_two_stage_splice(out: &File, payload: &File, len: u64, nonblock_stall_timeout: Option<Duration>) -> io::Result<()> {
     let payload_fd = payload.as_raw_fd();
     let mut temp_in_offset = 0i64;
     let out_fd = out.as_raw_fd();
@@ -265,23 +233,11 @@ fn write_all_two_stage_splice(
         // extra bytes into the paste.
         let chunk = (len - temp_in_offset as u64).min(TEMP_PIPE_GROW_SIZE as u64) as usize;
         // SAFETY: the payload fd and both pipe ends are open, and temp_in_offset is a valid i64
-        let mut pending_bytes = unsafe {
-            splice(
-                payload_fd,
-                &mut temp_in_offset,
-                temp_fd_writer,
-                ptr::null_mut(),
-                chunk,
-                0,
-            )
-        };
+        let mut pending_bytes = unsafe { splice(payload_fd, &mut temp_in_offset, temp_fd_writer, ptr::null_mut(), chunk, 0) };
 
         if pending_bytes == 0 {
             // should not happen as being in the loop means there are more bytes to move.
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "Unexpected EOF of payload while splicing",
-            ));
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "Unexpected EOF of payload while splicing"));
         }
 
         if pending_bytes == -1 {
@@ -294,16 +250,7 @@ fn write_all_two_stage_splice(
 
         while pending_bytes > 0 {
             // SAFETY: both pipe fds are open for the whole call.
-            let temp_written = unsafe {
-                splice(
-                    temp_fd_reader,
-                    ptr::null_mut(),
-                    out_fd,
-                    ptr::null_mut(),
-                    pending_bytes as usize,
-                    0,
-                )
-            };
+            let temp_written = unsafe { splice(temp_fd_reader, ptr::null_mut(), out_fd, ptr::null_mut(), pending_bytes as usize, 0) };
 
             if temp_written == -1 {
                 let err = io::Error::last_os_error();
@@ -318,20 +265,14 @@ fn write_all_two_stage_splice(
             }
 
             if temp_written == 0 {
-                return Err(io::Error::new(
-                    ErrorKind::WriteZero,
-                    "paste pipe accepted no data",
-                ));
+                return Err(io::Error::new(ErrorKind::WriteZero, "paste pipe accepted no data"));
             }
 
             pending_bytes -= temp_written;
         }
     }
 
-    debug_assert!(
-        temp_in_offset == len as i64,
-        "Not all input bytes were spliced"
-    );
+    debug_assert!(temp_in_offset == len as i64, "Not all input bytes were spliced");
 
     Ok(())
 }

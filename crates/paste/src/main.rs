@@ -12,8 +12,7 @@ use std::{
 };
 
 use clipleaf_core::{
-    WlBufferedStream, WlSessionEvent, WlSessionManager, ffi::fd::resize_pipe, init_logging,
-    log_debug, log_error, mime_types::TEXT_MIME_TYPES,
+    WlBufferedStream, WlSessionEvent, WlSessionManager, ffi::fd::resize_pipe, init_logging, log_debug, log_error, mime_types::TEXT_MIME_TYPES,
 };
 
 use crate::args::{Command, PasteArgs};
@@ -59,9 +58,7 @@ fn init() -> io::Result<WlSessionManager> {
     let callback_id = mgr.schedule_sync()?;
     mgr.flush()?;
 
-    while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
-    {
-    }
+    while !matches!(mgr.next_event()?, WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id) {}
     Ok(mgr)
 }
 
@@ -72,21 +69,14 @@ fn write_offered_types_to_stdout(mimes: &[Cow<'static, str>]) -> io::Result<()> 
     if !mimes.is_empty() {
         writeln!(out_guard, "{}", mimes.join("\n"))?;
     } else {
-        return Err(io::Error::new(
-            ErrorKind::NotFound,
-            "No offered MIME types available",
-        ));
+        return Err(io::Error::new(ErrorKind::NotFound, "No offered MIME types available"));
     }
 
     Ok(())
 }
 
 fn get_offered_types(mgr: &mut WlSessionManager, primary: bool) -> &[Cow<'static, str>] {
-    if let Some(offer) = if primary {
-        mgr.get_primary_offer()
-    } else {
-        mgr.get_offer()
-    } {
+    if let Some(offer) = if primary { mgr.get_primary_offer() } else { mgr.get_offer() } {
         offer.offered_mime_types()
     } else {
         &[]
@@ -110,11 +100,7 @@ fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Resu
         ));
     };
 
-    log_debug!(
-        "Asked mime: {:?}, preferred mime: {:?}",
-        args.mime,
-        preferred_mime
-    );
+    log_debug!("Asked mime: {:?}, preferred mime: {:?}", args.mime, preferred_mime);
 
     let stdout = io::stdout();
     let is_terminal = stdout.is_terminal();

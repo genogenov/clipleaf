@@ -23,14 +23,7 @@ unsafe extern "C" {
     pub fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 
     /// Moves data between two file descriptors without copying between kernel and user space. Link to doc: https://man7.org/linux/man-pages/man2/splice.2.html
-    pub fn splice(
-        fd_in: RawFd,
-        off_in: *mut i64,
-        fd_out: RawFd,
-        off_out: *mut i64,
-        len: usize,
-        flags: u32,
-    ) -> isize;
+    pub fn splice(fd_in: RawFd, off_in: *mut i64, fd_out: RawFd, off_out: *mut i64, len: usize, flags: u32) -> isize;
 
     /// Waits for events on a set of file descriptors. Link to doc: https://man7.org/linux/man-pages/man2/poll.2.html
     pub fn poll(fds: *mut pollfd, nfds: std::ffi::c_ulong, timeout: i32) -> i32;
@@ -99,12 +92,7 @@ pub const O_TMPFILE: i32 = (1 << 25) | (1 << 16);
 )))]
 pub const O_TMPFILE: i32 = (1 << 22) | (1 << 16); // kernel default: x86, riscv, loongarch, s390x, mips
 
-#[cfg(any(
-    target_arch = "mips",
-    target_arch = "mips32r6",
-    target_arch = "mips64",
-    target_arch = "mips64r6",
-))]
+#[cfg(any(target_arch = "mips", target_arch = "mips32r6", target_arch = "mips64", target_arch = "mips64r6",))]
 pub const O_NONBLOCK: i32 = 1 << 7;
 
 #[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]

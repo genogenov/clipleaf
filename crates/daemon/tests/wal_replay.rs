@@ -12,21 +12,11 @@ use common::{wal::*, *};
 
 fn append(state: &StateDir, bytes: &[u8]) {
     use std::io::Write;
-    OpenOptions::new()
-        .append(true)
-        .open(state.wal())
-        .unwrap()
-        .write_all(bytes)
-        .unwrap();
+    OpenOptions::new().append(true).open(state.wal()).unwrap().write_all(bytes).unwrap();
 }
 
 fn set_wal_len(state: &StateDir, len: u64) {
-    OpenOptions::new()
-        .write(true)
-        .open(state.wal())
-        .unwrap()
-        .set_len(len)
-        .unwrap();
+    OpenOptions::new().write(true).open(state.wal()).unwrap().set_len(len).unwrap();
 }
 
 /// Breaks a copy of the log in place.
@@ -56,11 +46,7 @@ fn the_history_survives_a_restart_and_a_recopy_after_it_is_a_duplicate() {
     daemon.stop();
 
     let mut daemon = Daemon::start_in(&state);
-    assert_eq!(
-        state.payload_files(),
-        files,
-        "a restored entry keeps its file"
-    );
+    assert_eq!(state.payload_files(), files, "a restored entry keeps its file");
     // The same copy again matches the restored entry: its types, sizes and hashes came back.
     assert_eq!(daemon.copy_dup(&a_types), a.id);
     assert_eq!(daemon.copy_dup(&text(b"world")), b.id);
@@ -124,11 +110,7 @@ fn an_evicted_entry_stays_gone_after_a_restart() {
     }
     // The 101st entry pushed the oldest out of the 100 kept.
     assert_eq!(daemon.next_delete(), oldest.id);
-    assert!(
-        state.payload_files().is_empty(),
-        "{:?}",
-        state.payload_files()
-    );
+    assert!(state.payload_files().is_empty(), "{:?}", state.payload_files());
     daemon.stop();
 
     let mut daemon = Daemon::start_in(&state);
@@ -151,11 +133,7 @@ fn a_torn_or_zero_filled_tail_is_cut_and_the_history_before_it_kept() {
     set_wal_len(&state, state.wal_len() - 3);
     let daemon = Daemon::start_in(&state);
     assert_eq!(state.wal_len(), after_first);
-    assert!(
-        state.payload_files().is_empty(),
-        "{:?}",
-        state.payload_files()
-    );
+    assert!(state.payload_files().is_empty(), "{:?}", state.payload_files());
     daemon.stop();
 
     // A power cut can leave the file longer than what was written, the rest zeros.
@@ -193,10 +171,7 @@ fn a_record_of_an_unknown_type_is_skipped_and_the_records_after_it_kept() {
     let mut daemon = Daemon::start_in(&state);
     let first = daemon.copy_new(&text(b"first"));
     daemon.stop();
-    append(
-        &state,
-        &record(salt_of(&state.wal_bytes()), 99, b"from the future"),
-    );
+    append(&state, &record(salt_of(&state.wal_bytes()), 99, b"from the future"));
     let with_unknown = state.wal_len();
 
     let mut daemon = Daemon::start_in(&state);
@@ -235,11 +210,7 @@ fn an_unusable_header_starts_an_empty_history_and_clears_the_payloads() {
         let fresh = state.wal_bytes();
         assert_eq!(fresh.len(), HEADER_LEN, "{what}");
         assert_eq!(&fresh[..14], IDENTIFIER, "{what}");
-        assert_ne!(
-            salt_of(&fresh),
-            old_salt,
-            "{what}: a fresh header has a new salt"
-        );
+        assert_ne!(salt_of(&fresh), old_salt, "{what}: a fresh header has a new salt");
         // The fresh log works: what's copied now is there after the next restart.
         let after = daemon.copy_new(&text(b"after"));
         daemon.stop();
@@ -292,22 +263,13 @@ fn an_entry_with_a_missing_or_short_payload_is_dropped_whole_and_strays_are_swep
     let path = |i: usize| state.payloads().join(&files[i].0);
     fs::remove_file(path(0)).unwrap(); // A's file is gone
     // B's first file is fine, its second one short: the whole entry goes, both files with it.
-    OpenOptions::new()
-        .write(true)
-        .open(path(2))
-        .unwrap()
-        .set_len(files[2].1 - 1)
-        .unwrap();
+    OpenOptions::new().write(true).open(path(2)).unwrap().set_len(files[2].1 - 1).unwrap();
     fs::write(state.payloads().join("999.0"), b"left by a crash").unwrap();
     fs::create_dir(state.payloads().join("1000.0")).unwrap();
     fs::write(state.payloads().join("1000.0/inside"), b"x").unwrap();
 
     let mut daemon = Daemon::start_in(&state);
-    assert!(
-        state.payload_files().is_empty(),
-        "{:?}",
-        state.payload_files()
-    );
+    assert!(state.payload_files().is_empty(), "{:?}", state.payload_files());
     assert_eq!(daemon.copy_dup(&text(b"inline")), c.id);
     assert!(!daemon.has(&text(&big1)));
     assert!(!daemon.has(&[(UTF8, &big2), (PNG, &big3)]));

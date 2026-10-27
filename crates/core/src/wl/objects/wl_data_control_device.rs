@@ -47,32 +47,28 @@ pub enum DataControlDeviceEvent {
 }
 
 impl WlDataControlDevice {
-    pub fn parse_message(
-        opcode: u16,
-        buffer: &[u8],
-        _fds: &mut InFdBuffer,
-    ) -> std::io::Result<DataControlDeviceEvent> {
+    pub fn parse_message(opcode: u16, buffer: &[u8], _fds: &mut InFdBuffer) -> std::io::Result<DataControlDeviceEvent> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
             DATA_OFFER => {
-                let new_id = reader.u32().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read new_id")
-                })?;
+                let new_id = reader
+                    .u32()
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read new_id"))?;
                 Ok(DataControlDeviceEvent::DataOffer { new_id })
             }
             SELECTION => {
-                let offer_id = reader.u32().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read offer_id")
-                })?;
+                let offer_id = reader
+                    .u32()
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read offer_id"))?;
                 Ok(DataControlDeviceEvent::Selection {
                     offer_id: if offer_id != 0 { Some(offer_id) } else { None },
                 })
             }
             FINISHED => Ok(DataControlDeviceEvent::Finished),
             PRIMARY_SELECTION => {
-                let offer_id = reader.u32().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read offer_id")
-                })?;
+                let offer_id = reader
+                    .u32()
+                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to read offer_id"))?;
                 Ok(DataControlDeviceEvent::PrimarySelection {
                     offer_id: if offer_id != 0 { Some(offer_id) } else { None },
                 })
@@ -85,24 +81,14 @@ impl WlDataControlDevice {
     }
 
     pub fn set_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
-        let mut msg = writer.begin_message::<WlDataControlDevice>(
-            WlDataControlDeviceOps::SetSelection,
-            self.local_id,
-        )?;
+        let mut msg = writer.begin_message::<WlDataControlDevice>(WlDataControlDeviceOps::SetSelection, self.local_id)?;
         msg.pack_u32(source_id)?;
         msg.end()?;
         Ok(())
     }
 
-    pub fn set_primary_selection(
-        &self,
-        writer: WlMessageWriter,
-        source_id: u32,
-    ) -> std::io::Result<()> {
-        let mut msg = writer.begin_message::<WlDataControlDevice>(
-            WlDataControlDeviceOps::SetPrimarySelection,
-            self.local_id,
-        )?;
+    pub fn set_primary_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
+        let mut msg = writer.begin_message::<WlDataControlDevice>(WlDataControlDeviceOps::SetPrimarySelection, self.local_id)?;
         msg.pack_u32(source_id)?;
         msg.end()?;
         Ok(())

@@ -10,8 +10,8 @@ use std::{
 use crate::{
     fd_io::{InFdBuffer, OUT_FD_BUFFER_LEN},
     ffi::definitions::{
-        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, MSG_NOSIGNAL, SCM_RIGHTS,
-        SOL_SOCKET, cmsg_align, cmsg_space, cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+        CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, MSG_DONTWAIT, MSG_NOSIGNAL, SCM_RIGHTS, SOL_SOCKET, cmsg_align, cmsg_space, cmsghdr, iovec,
+        msghdr, recvmsg, sendmsg,
     },
 };
 
@@ -37,9 +37,7 @@ impl AsFd for UnixFdStream {
 
 impl From<UnixStream> for UnixFdStream {
     fn from(stream: UnixStream) -> Self {
-        Self {
-            stream_fd: stream.into(),
-        }
+        Self { stream_fd: stream.into() }
     }
 }
 
@@ -62,12 +60,7 @@ impl UnixFdStream {
         Ok(UnixStream::connect(path)?.into())
     }
 
-    pub(crate) fn read(
-        &self,
-        buffer: &mut [u8],
-        fd_buffer: &mut InFdBuffer,
-        mode: ReadMode,
-    ) -> std::io::Result<usize> {
+    pub(crate) fn read(&self, buffer: &mut [u8], fd_buffer: &mut InFdBuffer, mode: ReadMode) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
             iov_len: buffer.len(),
@@ -142,12 +135,7 @@ impl UnixFdStream {
         }
     }
 
-    pub fn write(
-        &self,
-        data: &[u8],
-        fds: &[Option<OwnedFd>],
-        mode: WriteMode,
-    ) -> std::io::Result<usize> {
+    pub fn write(&self, data: &[u8], fds: &[Option<OwnedFd>], mode: WriteMode) -> std::io::Result<usize> {
         if fds.is_empty() {
             self.send_all(&mut [], data, mode)
         } else if fds.len() > OUT_FD_BUFFER_LEN {
@@ -160,8 +148,7 @@ impl UnixFdStream {
                 buff: [0u8; CTRL_BUFFER_SIZE],
             };
             let mut_ctrl_buffer = &mut ctrl_buffer.buff;
-            mut_ctrl_buffer[..USIZE]
-                .copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
+            mut_ctrl_buffer[..USIZE].copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
             mut_ctrl_buffer[USIZE..USIZE + 4].copy_from_slice(&SOL_SOCKET.to_ne_bytes());
             mut_ctrl_buffer[USIZE + 4..USIZE + 8].copy_from_slice(&SCM_RIGHTS.to_ne_bytes());
             for (dst, fd) in mut_ctrl_buffer[CMSG_FD_OFFSET..]
@@ -179,19 +166,11 @@ impl UnixFdStream {
 
     /// Returns the bytes sent - all of the data in Block mode.
     /// The fds were sent iff the result is > 0.
-    fn send_all(
-        &self,
-        msg_control: &mut [u8],
-        buff: &[u8],
-        mode: WriteMode,
-    ) -> std::io::Result<usize> {
+    fn send_all(&self, msg_control: &mut [u8], buff: &[u8], mode: WriteMode) -> std::io::Result<usize> {
         let mut total_bytes_sent = 0;
         let (mut control, mut ctrl_length) = match msg_control {
             [] => (ptr::null_mut(), 0),
-            _ => (
-                msg_control.as_mut_ptr() as *mut std::ffi::c_void,
-                msg_control.len(),
-            ),
+            _ => (msg_control.as_mut_ptr() as *mut std::ffi::c_void, msg_control.len()),
         };
 
         // Do not kill the process on SIGPIPE - let it error out as EPIPE which we handle.

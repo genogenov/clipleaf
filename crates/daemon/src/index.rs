@@ -51,10 +51,7 @@ pub struct SnapshotHandle(Arc<Mutex<Arc<Snapshot>>>);
 
 impl SnapshotHandle {
     pub fn get_clone(&self) -> Arc<Snapshot> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn get(&self) -> MutexGuard<'_, Arc<Snapshot>> {
@@ -90,11 +87,7 @@ impl Index {
                     entry,
                     done_signal,
                 } => self.insert(seq, time_ms, entry, done_signal),
-                IndexMsg::SetThumb {
-                    id,
-                    type_index,
-                    meta,
-                } => self.set_thumb(id, type_index, meta),
+                IndexMsg::SetThumb { id, type_index, meta } => self.set_thumb(id, type_index, meta),
             }
         }
     }
@@ -124,9 +117,7 @@ impl Index {
                 self.publish(items);
                 return;
             } else {
-                log_error!(
-                    "Could not find id {id} in entries for duplicate - this is a bug. Inserting entry as new."
-                )
+                log_error!("Could not find id {id} in entries for duplicate - this is a bug. Inserting entry as new.")
             }
         }
 
@@ -170,11 +161,7 @@ impl Index {
         self.publish(items);
 
         for imgjob in jobs {
-            log_debug!(
-                "Pushing Img processing job entry ID {} and type idx {}",
-                imgjob.id,
-                imgjob.type_index
-            );
+            log_debug!("Pushing Img processing job entry ID {} and type idx {}", imgjob.id, imgjob.type_index);
             self.img_queue.push(imgjob);
         }
         let _ = done_signal.try_send(());
@@ -185,27 +172,20 @@ impl Index {
             .types
             .iter()
             .enumerate()
-            .filter(|(_, t)| {
-                t.meta.is_none()
-                    && ContentKind::from_mime(&t.mime).is_some_and(|k| k == ContentKind::Image)
-            })
+            .filter(|(_, t)| t.meta.is_none() && ContentKind::from_mime(&t.mime).is_some_and(|k| k == ContentKind::Image))
             .map(|(i, t_img)| ImageJob {
                 id: entry.id,
                 type_index: i as u32,
                 source: match t_img.data {
                     Data::Inline(ref items) => ImageSource::Inline(items.clone()),
-                    Data::File(ref payload_file) => {
-                        ImageSource::File(payload_file.payload_path(&self.payload_dir, entry.id))
-                    }
+                    Data::File(ref payload_file) => ImageSource::File(payload_file.payload_path(&self.payload_dir, entry.id)),
                 },
             })
     }
 
     fn set_thumb(&mut self, id: u64, type_index: u32, meta: TypeMeta) {
         let Some(pos) = self.current.items.iter().position(|i| i.entry.id == id) else {
-            log_debug!(
-                "Item with ID {id} not found in current items - possibly evicted - dropping set thumb msg"
-            );
+            log_debug!("Item with ID {id} not found in current items - possibly evicted - dropping set thumb msg");
             return;
         };
 
@@ -214,13 +194,8 @@ impl Index {
         let Some(item) = items.get_mut(pos) else {
             return;
         };
-        let Some(entry) = item
-            .entry
-            .clone_with_meta_as_committed(type_index as usize, meta)
-        else {
-            log_warn!(
-                "Could not clone entry with ID {id} and type index {type_index} for set_thumb - dropping set thumb msg"
-            );
+        let Some(entry) = item.entry.clone_with_meta_as_committed(type_index as usize, meta) else {
+            log_warn!("Could not clone entry with ID {id} and type index {type_index} for set_thumb - dropping set thumb msg");
             return;
         };
 
@@ -260,9 +235,7 @@ pub fn spawn_index(
     let (tx, rx) = mpsc::channel();
 
     let pinned_count = restored.items.iter().filter(|i| i.pinned).count();
-    let current = Arc::new(Snapshot {
-        items: restored.items,
-    });
+    let current = Arc::new(Snapshot { items: restored.items });
     let handle = SnapshotHandle(Arc::new(Mutex::new(current.clone())));
     let index = Index {
         by_key: restored.by_key,
@@ -275,8 +248,6 @@ pub fn spawn_index(
         payload_dir,
     };
 
-    thread::Builder::new()
-        .name("index".into())
-        .spawn(move || index.run(rx))?;
+    thread::Builder::new().name("index".into()).spawn(move || index.run(rx))?;
     Ok((tx, handle))
 }

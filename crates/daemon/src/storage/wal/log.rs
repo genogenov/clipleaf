@@ -20,10 +20,7 @@ use crate::{
     storage::{
         Data, Entry, RESTORE_ID_LIMIT, entry,
         wal::{
-            encoder::{
-                HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, encode_append, encode_delete,
-                encode_thumb, encode_touch,
-            },
+            encoder::{HEADER_LEN, MAX_RECORD_LEN, RestoreItem, RestoreOp, encode_append, encode_delete, encode_thumb, encode_touch},
             error::WalError,
             record_reader::WalReader,
             wal_file::WalFile,
@@ -117,9 +114,7 @@ impl WriteAheadLog {
         let dead_bytes = self.wal_file.len() - HEADER_LEN as u64 - self.live_size;
         let dead_to_live_ratio = dead_bytes as f32 / self.live_size as f32;
 
-        let should_compact = self.has_pending_compact
-            || (dead_to_live_ratio >= COMPACT_ON_MIN_DEAD_RATIO
-                && dead_bytes >= MIN_DEAD_SIZE_FOR_COMPACT);
+        let should_compact = self.has_pending_compact || (dead_to_live_ratio >= COMPACT_ON_MIN_DEAD_RATIO && dead_bytes >= MIN_DEAD_SIZE_FOR_COMPACT);
         if should_compact {
             log_debug!(
                 "WAL: dead to live ratio: {dead_to_live_ratio}, dead size:{dead_bytes}, has pending compact: {}. Starting compact..",
@@ -196,10 +191,7 @@ impl WriteAheadLog {
             let entry = match entry_res {
                 Ok(tuple) => tuple,
                 Err(e) => match e {
-                    WalError::BadIdentifier
-                    | WalError::UnsupportedVersion(_)
-                    | WalError::Corrupted
-                    | WalError::RecordTooLarge => {
+                    WalError::BadIdentifier | WalError::UnsupportedVersion(_) | WalError::Corrupted | WalError::RecordTooLarge => {
                         log_error!("Failed reading entry - skipping rest. Error: {e}");
                         break;
                     }
@@ -232,19 +224,13 @@ impl WriteAheadLog {
                         e.time_ms = max(e.time_ms, time_ms);
                     });
                 }
-                RestoreOp::Thumb {
-                    id,
-                    type_index,
-                    meta,
-                } => {
+                RestoreOp::Thumb { id, type_index, meta } => {
                     let Some(item) = by_id.get_mut(&id) else {
                         log_warn!("Could not find entry with ID {id} for Thumb record");
                         continue;
                     };
                     let Some(t) = item.types.get_mut(type_index as usize) else {
-                        log_warn!(
-                            "Could not find type  with id {type_index} in entry with ID {id} for Thumb record"
-                        );
+                        log_warn!("Could not find type  with id {type_index} in entry with ID {id} for Thumb record");
                         continue;
                     };
                     t.meta = Some(meta);
@@ -256,11 +242,7 @@ impl WriteAheadLog {
         (by_id, max_seq_seen)
     }
 
-    fn restore(
-        &mut self,
-        mut by_id: HashMap<u64, RestoreItem>,
-        max_seq_seen: u64,
-    ) -> io::Result<Restored> {
+    fn restore(&mut self, mut by_id: HashMap<u64, RestoreItem>, max_seq_seen: u64) -> io::Result<Restored> {
         log_debug!("Begin WAL restore..");
         // let mut buff = Vec::new();
         //let bytes = self.wal_file.read_to_end(&mut buff)?;
@@ -320,10 +302,7 @@ impl WriteAheadLog {
                 sorted.push(val);
                 paths_accounted_for.extend(valid_paths);
             } else {
-                log_warn!(
-                    "Skipping entry {} because payload coult not be found",
-                    val.id
-                )
+                log_warn!("Skipping entry {} because payload coult not be found", val.id)
             }
         }
 
@@ -380,9 +359,7 @@ impl WriteAheadLog {
     pub fn start(self) -> io::Result<Sender<LogMsg>> {
         let (tx, rx) = mpsc::channel();
 
-        thread::Builder::new()
-            .name("WAL".into())
-            .spawn(move || self.run(rx))?;
+        thread::Builder::new().name("WAL".into()).spawn(move || self.run(rx))?;
         Ok(tx)
     }
 
@@ -417,10 +394,7 @@ impl WriteAheadLog {
             }
             Ok(()) => {
                 if self.logged_failures > 0 {
-                    log_info!(
-                        "WAL writes recovered after {} failed records",
-                        self.logged_failures
-                    );
+                    log_info!("WAL writes recovered after {} failed records", self.logged_failures);
                     self.logged_failures = 0;
                     if self.processing_failures > 0 {
                         self.has_pending_compact = true;
@@ -502,9 +476,7 @@ impl WriteAheadLog {
                 log_info!("Recovered after pending trim");
                 self.has_pending_trim = false;
             } else {
-                return Err(io::Error::other(
-                    "WAL has a failing pending trim, skipping message.",
-                ));
+                return Err(io::Error::other("WAL has a failing pending trim, skipping message."));
             }
         }
 
@@ -521,19 +493,14 @@ impl WriteAheadLog {
     }
 
     fn append(&mut self, record: &Item) -> io::Result<()> {
-        log_debug!(
-            "Processing WAL append entry id {}, seq: {}",
-            record.entry.id,
-            record.seq
-        );
+        log_debug!("Processing WAL append entry id {}, seq: {}", record.entry.id, record.seq);
 
         // skip encode append if syncing fails - no history storage.
         log_debug!("syncing entry payload files..");
         self.sync_payload_files(record)?;
 
         let salt = self.wal_file.header().salt;
-        let len =
-            encode_append(record, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
+        let len = encode_append(record, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
         self.live_records.insert(
             record.entry.id,
             LogItem {
@@ -547,10 +514,7 @@ impl WriteAheadLog {
             l.size_on_disk = len as u32;
         }
         self.live_size += len as u64;
-        self.next_min_seq = max(
-            self.next_min_seq,
-            record.seq.max(record.entry.id).saturating_add(1),
-        );
+        self.next_min_seq = max(self.next_min_seq, record.seq.max(record.entry.id).saturating_add(1));
         log_debug!("Processed WAL append - written {} bytes", len);
         Ok(())
     }
@@ -558,8 +522,7 @@ impl WriteAheadLog {
     fn delete(&mut self, entry: &Item) -> Result<(), io::Error> {
         log_debug!("Processing WAL delete..");
         let salt = self.wal_file.header().salt;
-        let len = encode_delete(entry.entry.id, self.wal_file.begin_record(), salt)
-            .map_err(io::Error::other)?;
+        let len = encode_delete(entry.entry.id, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
 
         let item = self.live_records.remove(&entry.entry.id);
         self.live_size -= item.map_or_default(|i| i.size_on_disk) as u64;
@@ -575,15 +538,12 @@ impl WriteAheadLog {
 
     fn touch(&mut self, id: u64, seq: u64, time_ms: u64) -> Result<(), io::Error> {
         let Some(log_item) = self.live_records.get_mut(&id) else {
-            log_debug!(
-                "Touch for entry {id} not in the log (its payload sync probably failed), skipped"
-            );
+            log_debug!("Touch for entry {id} not in the log (its payload sync probably failed), skipped");
             return Ok(());
         };
 
         let salt = self.wal_file.header().salt;
-        let len = encode_touch(id, seq, time_ms, self.wal_file.begin_record(), salt)
-            .map_err(io::Error::other)?;
+        let len = encode_touch(id, seq, time_ms, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
 
         log_item.item.seq = seq;
         log_item.item.time_ms = time_ms;
@@ -600,11 +560,7 @@ impl WriteAheadLog {
             return Ok(());
         }
         let Some(t) = item.entry.types.get(type_index as usize) else {
-            log_debug!(
-                "Thumb for entry {} and type index {} not in the log, skipped",
-                item.entry.id,
-                type_index
-            );
+            log_debug!("Thumb for entry {} and type index {} not in the log, skipped", item.entry.id, type_index);
             return Ok(());
         };
 
@@ -618,14 +574,7 @@ impl WriteAheadLog {
         };
 
         let salt = self.wal_file.header().salt;
-        let len = encode_thumb(
-            item.entry.id,
-            type_index,
-            meta,
-            self.wal_file.begin_record(),
-            salt,
-        )
-        .map_err(io::Error::other)?;
+        let len = encode_thumb(item.entry.id, type_index, meta, self.wal_file.begin_record(), salt).map_err(io::Error::other)?;
 
         self.write_to_log()?;
         let Some(log_item) = self.live_records.get_mut(&item.entry.id) else {
@@ -645,8 +594,7 @@ impl WriteAheadLog {
             return Err(e);
         }
         self.wal_file.flush()?;
-        self.last_written_without_sync
-            .get_or_insert_with(Instant::now);
+        self.last_written_without_sync.get_or_insert_with(Instant::now);
         Ok(())
     }
 

@@ -81,10 +81,7 @@ impl JobGuard {
             result,
             elapsed: self.started.elapsed(),
         }) {
-            return Err(io::Error::other(format!(
-                "failed to send JobMsg to receiver: {}",
-                e
-            )));
+            return Err(io::Error::other(format!("failed to send JobMsg to receiver: {}", e)));
         }
         self.sent = true;
         self.publish.event.signal()?;
@@ -113,10 +110,7 @@ impl JobList {
             active: VecDeque::new(),
             cancelling: Vec::new(),
             next_id: 0,
-            publish: JobPublish {
-                tx,
-                event: signal.clone(),
-            },
+            publish: JobPublish { tx, event: signal.clone() },
             subscribe: JobSubscribe { rx, event: signal },
         })
     }
@@ -130,25 +124,20 @@ impl JobList {
         let job_cancel = cancel_ev.clone();
 
         let id = self.next_id;
-        let job = Job {
-            id,
-            cancel: cancel_ev,
-        };
+        let job = Job { id, cancel: cancel_ev };
 
         let guard_publish = self.publish.clone();
         let started = Instant::now();
-        thread::Builder::new()
-            .name(format!("{name}-{}", job.id))
-            .spawn(move || {
-                let guard = JobGuard {
-                    id,
-                    publish: guard_publish,
-                    sent: false,
-                    started,
-                };
-                let outcome = body(&job_cancel);
-                _ = guard.finish(JobResult::Done(outcome));
-            })?;
+        thread::Builder::new().name(format!("{name}-{}", job.id)).spawn(move || {
+            let guard = JobGuard {
+                id,
+                publish: guard_publish,
+                sent: false,
+                started,
+            };
+            let outcome = body(&job_cancel);
+            _ = guard.finish(JobResult::Done(outcome));
+        })?;
 
         if self.active.len() == MAX_JOBS {
             let oldest_job = self.active.pop_front().unwrap();
@@ -187,12 +176,7 @@ impl JobList {
         while let Ok(msg) = self.subscribe.rx.try_recv() {
             if let Some(j_idx) = self.active.iter().position(|j| j.id == msg.id) {
                 self.active.remove(j_idx); // drops the job's cancel eventfd
-                log_debug!(
-                    "Job {} completed with outcome {:?} in {:?}",
-                    msg.id,
-                    msg.result,
-                    msg.elapsed
-                );
+                log_debug!("Job {} completed with outcome {:?} in {:?}", msg.id, msg.result, msg.elapsed);
 
                 return Some(msg);
             } else if let Some(j_idx) = self.cancelling.iter().position(|j| j.id == msg.id) {
@@ -205,10 +189,7 @@ impl JobList {
                 );
                 return Some(msg);
             } else {
-                log_error!(
-                    "Job Id {} was not found in neither the active nor the cancelling jobs list",
-                    msg.id
-                );
+                log_error!("Job Id {} was not found in neither the active nor the cancelling jobs list", msg.id);
             }
         }
 
@@ -246,10 +227,7 @@ mod tests {
 
     /// Waits until the job is cancelled or `release` is closed.
     fn wait_for_cancel_or(cancel: &EventFd, release: &PipeReader) -> JobOutcome {
-        let mut fds = [
-            PollFd::new(cancel.as_fd(), PollEvents::IN),
-            PollFd::new(release.as_fd(), PollEvents::IN),
-        ];
+        let mut fds = [PollFd::new(cancel.as_fd(), PollEvents::IN), PollFd::new(release.as_fd(), PollEvents::IN)];
         poll(&mut fds, None).unwrap();
         if fds[0].revents().has_any(PollEvents::IN) {
             JobOutcome::Cancelled
@@ -262,9 +240,7 @@ mod tests {
     fn a_finished_job_rings_the_bell_and_hands_over_its_result_once() {
         let mut jobs = JobList::new().unwrap();
         let id = jobs
-            .start("test", |_| {
-                JobOutcome::Data(JobData::Fetch(vec![("text/plain".into(), 5)]))
-            })
+            .start("test", |_| JobOutcome::Data(JobData::Fetch(vec![("text/plain".into(), 5)])))
             .unwrap();
 
         let msg = next_done(&mut jobs);
@@ -279,19 +255,11 @@ mod tests {
     #[test]
     fn a_job_that_panics_is_reported_as_panicked() {
         let mut jobs = JobList::new().unwrap();
-        let id = jobs
-            .start("test", |_| -> JobOutcome {
-                panic!("job panics on purpose")
-            })
-            .unwrap();
+        let id = jobs.start("test", |_| -> JobOutcome { panic!("job panics on purpose") }).unwrap();
 
         let msg = next_done(&mut jobs);
         assert_eq!(msg.id, id);
-        assert!(
-            matches!(msg.result, JobResult::Panicked),
-            "{:?}",
-            msg.result
-        );
+        assert!(matches!(msg.result, JobResult::Panicked), "{:?}", msg.result);
     }
 
     #[test]
@@ -301,8 +269,7 @@ mod tests {
         let ids: Vec<JobId> = (0..=MAX_JOBS)
             .map(|_| {
                 let release = release.try_clone().unwrap();
-                jobs.start("test", move |cancel| wait_for_cancel_or(cancel, &release))
-                    .unwrap()
+                jobs.start("test", move |cancel| wait_for_cancel_or(cancel, &release)).unwrap()
             })
             .collect();
         assert_eq!(ids, (0..=MAX_JOBS as JobId).collect::<Vec<_>>());
@@ -310,21 +277,13 @@ mod tests {
         // Nothing else can finish before the release, so the first message is the oldest job.
         let msg = next_done(&mut jobs);
         assert_eq!(msg.id, ids[0]);
-        assert!(
-            matches!(msg.result, JobResult::Done(JobOutcome::Cancelled)),
-            "{:?}",
-            msg.result
-        );
+        assert!(matches!(msg.result, JobResult::Done(JobOutcome::Cancelled)), "{:?}", msg.result);
 
         drop(release_all);
         let mut finished: Vec<JobId> = (0..MAX_JOBS)
             .map(|_| {
                 let msg = next_done(&mut jobs);
-                assert!(
-                    matches!(msg.result, JobResult::Done(JobOutcome::Data(_))),
-                    "{:?}",
-                    msg.result
-                );
+                assert!(matches!(msg.result, JobResult::Done(JobOutcome::Data(_))), "{:?}", msg.result);
                 msg.id
             })
             .collect();

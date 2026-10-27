@@ -50,18 +50,12 @@ fn a_log_that_is_mostly_dead_is_rewritten_at_startup_as_its_live_entries() {
     let mut daemon = Daemon::start_in(&state);
     let inserts = inserts_by_id(daemon.wait_compacted(old_salt));
     assert_eq!(inserts.len(), 2);
-    assert_eq!(
-        inserts[&a.id].seq, touched,
-        "the Touch is folded into A's Insert"
-    );
+    assert_eq!(inserts[&a.id].seq, touched, "the Touch is folded into A's Insert");
     assert_eq!(inserts[&b.id].sizes(), b.sizes());
     assert!(inserts[&b.id].types[0].in_file);
     let max_seq = inserts.values().map(|i| i.id.max(i.seq)).max().unwrap();
     let floor = seq_snapshot_of(&state.wal_bytes());
-    assert!(
-        floor > max_seq,
-        "the new header keeps the seq floor: {floor} <= {max_seq}"
-    );
+    assert!(floor > max_seq, "the new header keeps the seq floor: {floor} <= {max_seq}");
     assert!(state.wal_len() < 64 * 1024, "{} bytes", state.wal_len());
     assert_eq!(state.payload_files(), [(format!("{}.0", b.id), 6000)]);
     // Records after the compaction are checksummed with the new salt: the next one is read.

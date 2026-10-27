@@ -76,8 +76,7 @@ pub fn poll(fds: &mut [PollFd<'_>], duration: Option<Duration>) -> io::Result<Po
         // SAFETY: PollFd is repr(transparent) over pollfd, so `fds` is a valid array of fds.len()
         // pollfds; each fd is borrowed (BorrowedFd<'fd>) and stays open for the call; the kernel
         // reads fd/events and writes only revents within the slice.
-        let result =
-            unsafe { definitions::poll(fds_ptr, fds.len() as std::ffi::c_ulong, timeout_ms) };
+        let result = unsafe { definitions::poll(fds_ptr, fds.len() as std::ffi::c_ulong, timeout_ms) };
         if result == 0 {
             return Ok(PollResult::Timeout);
         }

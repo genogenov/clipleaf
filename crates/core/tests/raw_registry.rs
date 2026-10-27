@@ -71,11 +71,7 @@ fn when_a_global_is_advertised_twice_the_last_one_is_bound() {
 fn global_remove_is_ignored() {
     // Protocol-legal. The client does not track removals, so the seat is still bound.
     let remove = wire::msg(REGISTRY, REGISTRY_GLOBAL_REMOVE, &1u32.to_ne_bytes());
-    let bound = initialize_with(&[
-        global(1, "wl_seat", 1),
-        global(54, "ext_data_control_manager_v1", 1),
-        remove,
-    ]);
+    let bound = initialize_with(&[global(1, "wl_seat", 1), global(54, "ext_data_control_manager_v1", 1), remove]);
     assert_eq!(bound.unwrap(), (54, 1));
 }
 

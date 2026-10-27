@@ -23,11 +23,7 @@ impl<T> WorkQueue<T> {
     }
 
     pub fn push(&self, job: T) {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .jobs
-            .push_back(job);
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).jobs.push_back(job);
         self.ready.notify_one();
     }
 
@@ -46,16 +42,9 @@ impl<T> WorkQueue<T> {
     fn pop(&self, take: impl FnOnce(&mut VecDeque<T>) -> Option<T>) -> Option<T> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         while state.jobs.is_empty() && !state.closed {
-            state = self
-                .ready
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
+            state = self.ready.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
-        if state.closed {
-            None
-        } else {
-            take(&mut state.jobs)
-        }
+        if state.closed { None } else { take(&mut state.jobs) }
     }
     pub fn pop_newest(&self) -> Option<T> {
         self.pop(VecDeque::pop_back)

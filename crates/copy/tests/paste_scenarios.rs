@@ -12,9 +12,7 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use clipleaf_core::{
-    WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::TEXT_MIME_TYPES,
-};
+use clipleaf_core::{WlBufferedStream, WlSessionEvent, WlSessionManager, mime_types::TEXT_MIME_TYPES};
 use clipleaf_test_common::{
     Config, Note, TestCompositor,
     bins::{self, Started},
@@ -27,9 +25,7 @@ fn paster(comp: &TestCompositor) -> WlSessionManager {
     let stream = WlBufferedStream::connect(&comp.socket_path()).unwrap();
     let mut session = WlSessionManager::initialize(stream).unwrap();
     let callback_id = session.schedule_sync().unwrap();
-    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
-    {
-    }
+    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id) {}
     session
 }
 
@@ -37,10 +33,7 @@ fn paster(comp: &TestCompositor) -> WlSessionManager {
 fn pasted(comp: &TestCompositor, primary: bool, mime: Option<&str>) -> Vec<u8> {
     let mut session = paster(comp);
     let (mut reader, writer) = fds::channel();
-    session
-        .receive_offer(primary, mime, writer)
-        .unwrap()
-        .expect("type offered");
+    session.receive_offer(primary, mime, writer).unwrap().expect("type offered");
     session.flush().unwrap();
     // Blocking: the relay dups the fd it forwards, so EOF can be microseconds late.
     fds::read_to_eof(&mut reader)
@@ -51,18 +44,14 @@ fn take_over(comp: &TestCompositor, primary: bool) -> WlSessionManager {
     let stream = WlBufferedStream::connect(&comp.socket_path()).unwrap();
     let mut session = WlSessionManager::initialize(stream).unwrap();
     let source = session.create_data_source().unwrap();
-    source
-        .offer(session.get_message_writer(), "text/plain")
-        .unwrap();
+    source.offer(session.get_message_writer(), "text/plain").unwrap();
     if primary {
         session.set_primary_selection(source.local_id).unwrap();
     } else {
         session.set_selection(source.local_id).unwrap();
     }
     let callback_id = session.schedule_sync().unwrap();
-    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id)
-    {
-    }
+    while !matches!(session.next_event().unwrap(), WlSessionEvent::SyncDone{callback_id: done_callback_id} if done_callback_id == callback_id) {}
     session
 }
 
@@ -75,12 +64,7 @@ fn foreground(comp: &TestCompositor, args: &[&str], primary: bool) -> (Started, 
 
 /// Starts `command` and waits until it owns the selection. If it exits first, the test fails
 /// with its stderr instead of hanging.
-fn launch(
-    comp: &TestCompositor,
-    mut command: Command,
-    input: Option<&[u8]>,
-    primary: bool,
-) -> (Started, Vec<String>) {
+fn launch(comp: &TestCompositor, mut command: Command, input: Option<&[u8]>, primary: bool) -> (Started, Vec<String>) {
     command.stdout(Stdio::null());
     let mut started = bins::start(comp, command, input);
     let types = started.wait_selection(comp, primary);
@@ -89,17 +73,8 @@ fn launch(
 
 /// A nameless file holding `data`, positioned at the start, for use as a child's stdin.
 fn stdin_file(data: &[u8]) -> File {
-    let path = std::env::temp_dir().join(format!(
-        "clipleaf-copy-test-{}-{}",
-        std::process::id(),
-        next_id()
-    ));
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .unwrap();
+    let path = std::env::temp_dir().join(format!("clipleaf-copy-test-{}-{}", std::process::id(), next_id()));
+    let mut file = fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).unwrap();
     fs::remove_file(&path).unwrap();
     file.write_all(data).unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();
@@ -181,11 +156,7 @@ fn stdin_is_copied_whatever_its_size_and_served_again_to_every_paster() {
         let (_copy, types) = copy_stdin(&comp, &[], &expected);
         assert_eq!(types, TEXT_MIME_TYPES);
         for paste in 1..=2 {
-            assert_same(
-                &pasted(&comp, false, None),
-                &expected,
-                &format!("len {len}, paste {paste}"),
-            );
+            assert_same(&pasted(&comp, false, None), &expected, &format!("len {len}, paste {paste}"));
         }
     }
 }
@@ -200,17 +171,14 @@ fn stdin_that_is_a_file_is_read_from_its_current_offset() {
         let mut command = bins::command(COPY, &comp, &["--foreground"]);
         command.stdin(input);
         let (_copy, _) = launch(&comp, command, None, false);
-        assert_same(
-            &pasted(&comp, false, None),
-            &expected[10..],
-            &format!("len {len}"),
-        );
+        assert_same(&pasted(&comp, false, None), &expected[10..], &format!("len {len}"));
     }
 }
 
 #[test]
 fn a_type_option_offers_only_that_type() {
-    let libreoffice = r#"application/x-openoffice-objectdescriptor-xml;windows_formatname="Star Object Descriptor (XML)";displayname="file:///tmp/Résumé.docx""#;
+    let libreoffice =
+        r#"application/x-openoffice-objectdescriptor-xml;windows_formatname="Star Object Descriptor (XML)";displayname="file:///tmp/Résumé.docx""#;
     for mime in ["image/png", libreoffice] {
         let comp = compositor();
         let (_copy, types) = copy_stdin(&comp, &["-t", mime], b"\x89PNG");
@@ -264,10 +232,7 @@ fn by_default_the_parent_exits_after_the_sync_and_exactly_one_child_keeps_servin
         } => Some(mimes),
         _ => None,
     });
-    assert_eq!(
-        selected.expect("the selection was set before the parent exited"),
-        &TEXT_MIME_TYPES
-    );
+    assert_eq!(selected.expect("the selection was set before the parent exited"), &TEXT_MIME_TYPES);
     assert_eq!(
         procs::find("clipleaf-copy", comp.runtime_dir()).len(),
         1,
@@ -317,10 +282,7 @@ fn a_missing_temp_dir_matters_only_when_the_input_is_large() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let err = stderr(&output);
-    assert!(
-        err.contains("--temp-dir") && err.contains("missing"),
-        "{err}"
-    );
+    assert!(err.contains("--temp-dir") && err.contains("missing"), "{err}");
 }
 
 // ---- how main reports what the argument parser rejects (the parser itself is unit tested) ----
@@ -339,10 +301,7 @@ fn a_usage_error_is_exit_code_1_with_the_message_and_usage_on_stderr() {
         assert_eq!(output.status.code(), Some(1), "{args:?}");
         assert_eq!(output.stdout, b"", "{args:?}");
         let err = stderr(&output);
-        assert!(
-            err.contains(named) && err.contains("Usage:"),
-            "{args:?}: {err}"
-        );
+        assert!(err.contains(named) && err.contains("Usage:"), "{args:?}: {err}");
     }
 }
 
@@ -350,11 +309,7 @@ fn a_usage_error_is_exit_code_1_with_the_message_and_usage_on_stderr() {
 fn file_mode_says_it_is_not_implemented_yet() {
     let output = bins::bare(COPY, &["--file", "a.png"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("not implemented"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("not implemented"), "{}", stderr(&output));
 }
 
 #[test]
@@ -363,10 +318,7 @@ fn help_goes_to_stdout_with_exit_code_0_even_without_a_compositor() {
         let output = bins::bare(COPY, args).output().unwrap();
         assert!(output.status.success(), "{args:?}");
         let out = String::from_utf8(output.stdout).unwrap();
-        assert!(
-            out.contains("Usage:") && out.contains("--foreground"),
-            "{out}"
-        );
+        assert!(out.contains("Usage:") && out.contains("--foreground"), "{out}");
     }
 }
 
@@ -376,27 +328,17 @@ fn help_goes_to_stdout_with_exit_code_0_even_without_a_compositor() {
 fn without_a_wayland_environment_it_says_what_is_missing() {
     let output = bins::bare(COPY, &["text"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("XDG_RUNTIME_DIR is not set"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("XDG_RUNTIME_DIR is not set"), "{}", stderr(&output));
 }
 
 #[test]
 fn a_display_that_does_not_exist_names_the_socket_it_tried() {
     let comp = compositor();
     let missing = comp.runtime_dir().join("no-such-display");
-    let output = bins::bare(COPY, &["text"])
-        .env("WAYLAND_DISPLAY", &missing)
-        .output()
-        .unwrap();
+    let output = bins::bare(COPY, &["text"]).env("WAYLAND_DISPLAY", &missing).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     let err = stderr(&output);
-    assert!(
-        err.contains("cannot connect to") && err.contains(missing.to_str().unwrap()),
-        "{err}"
-    );
+    assert!(err.contains("cannot connect to") && err.contains(missing.to_str().unwrap()), "{err}");
 }
 
 #[test]
@@ -407,9 +349,5 @@ fn a_compositor_without_data_control_is_reported_by_protocol_name() {
     });
     let output = bins::run(COPY, &comp, &["text"]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(
-        stderr(&output).contains("ext_data_control_manager_v1"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("ext_data_control_manager_v1"), "{}", stderr(&output));
 }

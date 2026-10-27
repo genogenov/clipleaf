@@ -54,11 +54,7 @@ pub struct StateDir(PathBuf);
 impl StateDir {
     pub fn new() -> Self {
         static N: AtomicU32 = AtomicU32::new(0);
-        let root = std::env::temp_dir().join(format!(
-            "clipleafd-state-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = std::env::temp_dir().join(format!("clipleafd-state-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         Self(root)
@@ -90,10 +86,7 @@ impl StateDir {
     pub fn append_dead(&self, mut total: u64) {
         const RECORD_OVERHEAD: u64 = 4 + 1 + 8; // len + type + checksum
         let salt = wal::salt_of(&self.wal_bytes());
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(self.wal())
-            .unwrap();
+        let mut file = fs::OpenOptions::new().append(true).open(self.wal()).unwrap();
         while total > 0 {
             let piece = total.min(200 * 1024);
             let body = vec![0u8; (piece - RECORD_OVERHEAD) as usize];
@@ -107,10 +100,7 @@ impl StateDir {
             .unwrap()
             .map(|e| {
                 let e = e.unwrap();
-                (
-                    e.file_name().into_string().unwrap(),
-                    e.metadata().unwrap().len(),
-                )
+                (e.file_name().into_string().unwrap(), e.metadata().unwrap().len())
             })
             .collect();
         files.sort_by_key(|(name, _)| id_and_type(name));
@@ -209,10 +199,7 @@ impl Daemon {
             panic!("clipleafd exited at startup: {status}");
         }
         let peer = comp.accept();
-        peer.send(&raw::registry_reply(&[
-            (1, "wl_seat", 1),
-            (54, "ext_data_control_manager_v1", 1),
-        ]));
+        peer.send(&raw::registry_reply(&[(1, "wl_seat", 1), (54, "ext_data_control_manager_v1", 1)]));
         let mut daemon = Self {
             peer,
             wal: state.wal(),
@@ -259,11 +246,7 @@ impl Daemon {
                 return thumb.clone();
             }
             match self.next_any_record() {
-                wal::Record::Thumb {
-                    id,
-                    type_index,
-                    thumb,
-                } => self.thumbs.push((id, type_index, thumb)),
+                wal::Record::Thumb { id, type_index, thumb } => self.thumbs.push((id, type_index, thumb)),
                 other => panic!("expected only Thumb records while waiting for one, got {other:?}"),
             }
         }
@@ -284,10 +267,7 @@ impl Daemon {
     pub fn wait_readable(&self, what: &str) {
         let mut fds = [PollFd::new(self.peer.as_fd(), PollEvents::IN)];
         let ready = poll(&mut fds, Some(WAIT)).unwrap();
-        assert!(
-            matches!(ready, PollResult::Ready(_)),
-            "no {what} from clipleafd"
-        );
+        assert!(matches!(ready, PollResult::Ready(_)), "no {what} from clipleafd");
     }
 
     pub fn send(&self, events: &[Vec<u8>]) {
@@ -356,18 +336,13 @@ impl Daemon {
                 mimes: Vec::new(),
                 destroyed: false,
             });
-        } else if id == DEVICE && (op == DEVICE_SET_SELECTION || op == DEVICE_SET_PRIMARY_SELECTION)
-        {
+        } else if id == DEVICE && (op == DEVICE_SET_SELECTION || op == DEVICE_SET_PRIMARY_SELECTION) {
             self.sets.push(SetSelection {
                 primary: op == DEVICE_SET_PRIMARY_SELECTION,
                 source: request.u32_at(0),
             });
         } else if id < SERVER_ID_START
-            && let Some(source) = self
-                .sources
-                .iter_mut()
-                .rev()
-                .find(|s| s.id == id && !s.destroyed)
+            && let Some(source) = self.sources.iter_mut().rev().find(|s| s.id == id && !s.destroyed)
         {
             match op {
                 SOURCE_OFFER => {
@@ -377,8 +352,7 @@ impl Daemon {
                 SOURCE_DESTROY => {
                     source.destroyed = true;
                     // As a compositor does: the id can be reused after this.
-                    self.peer
-                        .send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &id.to_ne_bytes()));
+                    self.peer.send(&wire::msg(DISPLAY, DISPLAY_DELETE_ID, &id.to_ne_bytes()));
                 }
                 _ => {}
             }
@@ -413,12 +387,7 @@ impl Daemon {
 
     /// The newest source with this id.
     pub fn source(&self, id: u32) -> Source {
-        self.sources
-            .iter()
-            .rev()
-            .find(|s| s.id == id)
-            .cloned()
-            .expect("a source with that id")
+        self.sources.iter().rev().find(|s| s.id == id).cloned().expect("a source with that id")
     }
 
     pub fn sources(&self) -> &[Source] {
@@ -432,18 +401,14 @@ impl Daemon {
 
     /// Waits until the daemon destroys this source.
     pub fn wait_source_destroyed(&mut self, id: u32) {
-        self.pump_until("destroyed its source", |d| {
-            d.sources.iter().any(|s| s.id == id && s.destroyed)
-        });
+        self.pump_until("destroyed its source", |d| d.sources.iter().any(|s| s.id == id && s.destroyed));
     }
 
     /// Asks the daemon's source for `mime`, as a pasting app does, and returns the read end.
     pub fn paste_start(&self, source: u32, mime: &[u8]) -> fs::File {
         let (rx, tx) = std::io::pipe().unwrap();
-        self.peer.send_with_fds(
-            &wire::msg(source, SOURCE_SEND, &wire::string(mime)),
-            &[tx.as_fd()],
-        );
+        self.peer
+            .send_with_fds(&wire::msg(source, SOURCE_SEND, &wire::string(mime)), &[tx.as_fd()]);
         drop(tx); // the daemon holds the only write end now
         fs::File::from(OwnedFd::from(rx))
     }
@@ -481,8 +446,7 @@ impl Daemon {
         let id = self.new_offer();
         let mimes: Vec<&str> = types.iter().map(|(m, _)| *m).collect();
         self.send(&[offer(id, &mimes), selection(id)]);
-        let receives =
-            self.receives_while(|rs| rs.iter().filter(|r| r.offer == id).count() < types.len());
+        let receives = self.receives_while(|rs| rs.iter().filter(|r| r.offer == id).count() < types.len());
         for receive in receives {
             assert_eq!(receive.offer, id, "a receive for an older copy");
             let (_, bytes) = types.iter().find(|(m, _)| *m == receive.mime).unwrap();
@@ -555,11 +519,7 @@ impl Daemon {
     pub fn next_record(&mut self) -> wal::Record {
         loop {
             match self.next_any_record() {
-                wal::Record::Thumb {
-                    id,
-                    type_index,
-                    thumb,
-                } => self.thumbs.push((id, type_index, thumb)),
+                wal::Record::Thumb { id, type_index, thumb } => self.thumbs.push((id, type_index, thumb)),
                 record => return record,
             }
         }
@@ -576,16 +536,9 @@ impl Daemon {
             }
             let child = self.child.as_mut().unwrap().child();
             if let Some(status) = child.try_wait().unwrap() {
-                panic!(
-                    "clipleafd exited ({status}) before writing record {}",
-                    self.seen
-                );
+                panic!("clipleafd exited ({status}) before writing record {}", self.seen);
             }
-            assert!(
-                start.elapsed() < WAIT,
-                "no WAL record {} from clipleafd",
-                self.seen
-            );
+            assert!(start.elapsed() < WAIT, "no WAL record {} from clipleafd", self.seen);
             thread::sleep(Duration::from_millis(1));
         }
     }
