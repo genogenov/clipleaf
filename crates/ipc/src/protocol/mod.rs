@@ -25,7 +25,7 @@ macro_rules! request {
     };
 }
 
+pub mod codec;
 pub mod handshake;
 pub mod header;
 pub mod v1;
-pub mod codec;
