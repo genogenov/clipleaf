@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::header::{MessageType, RequestType};
@@ -7,16 +9,13 @@ use crate::protocol::header::{MessageType, RequestType};
 /// Must be the first frame on a connection, in both directions.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Hello {
-    /// Always "clipleaf".
-    pub proto: String,
-    pub version: u32,
+    pub versions: Vec<u32>,
     #[serde(default)]
     pub features: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct HelloReply {
-    pub proto: String,
     pub version: u32,
     #[serde(default)]
     pub features: Vec<String>,
@@ -29,6 +28,12 @@ pub struct ErrorReply {
     pub code: ErrorCode,
     #[serde(default)]
     pub message: String,
+}
+
+impl Display for ErrorReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(Error {:?}):{}", self.code, self.message)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

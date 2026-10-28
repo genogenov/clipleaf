@@ -1,6 +1,6 @@
 pub const HEADER_LEN: usize = 12;
-// pub const MAX_REQUEST_LEN: u32 = 64 * 1024;
-// pub const MAX_FRAME_LEN: u32 = 32 * 1024 * 1024;
+pub const MAX_REQUEST_LEN: u32 = 64 * 1024;
+pub const MAX_FRAME_LEN: u32 = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -53,6 +53,12 @@ impl MessageType {
             _ => Self::Unknown((category as u16) << 8 | index as u16),
         }
     }
+
+    pub fn from_wire_u16(t: u16) -> Self {
+        let [category, index] = t.to_be_bytes();
+        Self::from_wire(category, index)
+    }
+
     pub fn to_wire(self) -> [u8; 2] {
         match self {
             Self::Request(r) => [MSG_REQUEST, r as u8],

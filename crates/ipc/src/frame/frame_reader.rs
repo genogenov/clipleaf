@@ -3,9 +3,9 @@ use std::{
     io::{self, Read},
 };
 
-use crate::{
-    frame::protocol_error::ProtocolError,
-    protocol::header::{HEADER_LEN, Header},
+use crate::protocol::{
+    error::ProtocolError,
+    header::{HEADER_LEN, Header},
 };
 
 pub const MIN_FRAME_BUFFER_SIZE: usize = HEADER_LEN + 1024;
@@ -33,27 +33,27 @@ impl FrameReader {
         }
     }
 
-    pub fn next_frame(&mut self) -> Result<Option<(Header, &[u8])>, ProtocolError> {
+    pub fn next_frame(&mut self) -> Option<Result<(Header, &[u8]), ProtocolError>> {
         let available = &self.buf[self.start..self.end];
         if let Some(h) = available.first_chunk::<HEADER_LEN>() {
             let header = Header::decode(h);
             if header.len as usize > self.max_frame_len - HEADER_LEN {
-                return Err(ProtocolError::FrameTooBig);
+                return Some(Err(ProtocolError::FrameTooBig));
             }
 
             let total = header.len as usize + HEADER_LEN;
 
             if available.len() < total {
                 self.pending_frame_len = total;
-                return Ok(None);
+                return None;
             }
             let body = &self.buf[self.start + HEADER_LEN..self.start + total];
             self.start += total;
             self.pending_frame_len = 0;
-            return Ok(Some((header, body)));
+            return Some(Ok((header, body)));
         }
 
-        Ok(None)
+        None
     }
 
     pub fn fill_from(&mut self, read: &mut impl Read) -> io::Result<usize> {
@@ -63,7 +63,7 @@ impl FrameReader {
             self.start = 0;
         }
 
-        let needed = max(self.default_buffer_size, self.pending_frame_len);
+        let needed = max(self.default_buffer_size, self.pending_frame_len).max(self.end + 1);
         if self.buf.len() < needed {
             self.buf.resize(needed, 0);
         } else if self.buf.len() > needed * SHRINK_FRAME_BUFFER_THRESHOLD_FACTOR {
