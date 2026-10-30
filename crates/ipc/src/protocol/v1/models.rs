@@ -6,7 +6,8 @@
 //!   are always `Option` or `#[serde(default)]`.
 //! - Enum-like fields are snake_case strings. Fields with a safe meaning for an unknown value have
 //!   a `#[serde(other)]` fallback; `Selection` and `Formats` have none (an unknown value is a
-//!   decode error → `bad_request`, never a different action).
+//!   decode error → `bad_request`, never a different action). Events use `EventSelection`, which
+//!   has one (a client skips a `SelectionChanged` for a selection it doesn't know).
 //! - Integers are fixed width (u64 ids/sizes/offsets/times, u32 counts), never usize.
 //! - Byte fields use `serde_bytes` (msgpack bin, not an int array). An `Option` byte field also
 //!   needs `default`: with `with = "serde_bytes"` a missing field is otherwise an error.
@@ -16,6 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::bounded_vec;
 use crate::protocol::header::{EventType, MessageType, RequestType};
 
 // ---- Enum-like fields ----
@@ -57,6 +59,17 @@ pub enum Selection {
     Both,
 }
 
+/// The selection a `SelectionChanged` event is about. Unlike `Selection` (a request's target),
+/// an unknown value from a newer daemon decodes as `Other`, which a client ignores.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSelection {
+    Clipboard,
+    Primary,
+    #[serde(other)]
+    Other,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Formats {
@@ -79,6 +92,7 @@ pub struct EntrySummary {
     /// At most 256 characters cut from the head (UTF-8 for text kinds; may end mid-line).
     #[serde(with = "serde_bytes")]
     pub preview: Vec<u8>,
+    #[serde(deserialize_with = "bounded_vec::bounded_vec::<_,_,256>")]
     pub types: Vec<TypeSummary>,
     pub thumb: Option<Thumb>,
     /// Number of files, for file-list entries.
@@ -145,6 +159,7 @@ pub struct List {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ListReply {
+    #[serde(deserialize_with = "bounded_vec::bounded_vec::<_,_,1000>")]
     pub entries: Vec<EntrySummary>,
     /// Entries matching the request in total (for paging).
     pub total: u64,
@@ -242,8 +257,7 @@ pub struct Cleared {}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SelectionChanged {
-    /// Clipboard or Primary (never Both).
-    pub selection: Selection,
+    pub selection: EventSelection,
     /// The history entry the selection holds now; None when cleared or not recorded.
     pub id: Option<u64>,
 }

@@ -25,6 +25,7 @@ macro_rules! request {
     };
 }
 
+mod bounded_vec;
 pub mod codec;
 pub mod error;
 pub mod handshake;

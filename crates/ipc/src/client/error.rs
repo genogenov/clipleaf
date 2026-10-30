@@ -13,6 +13,7 @@ pub enum ClientError {
     ConnectionError(ErrorReply),
     Poisoned,
     Timeout,
+    EventQueueFull,
 }
 
 impl From<io::Error> for ClientError {
@@ -39,6 +40,7 @@ impl error::Error for ClientError {
             ClientError::UnsupportedVersion => None,
             ClientError::Poisoned => None,
             ClientError::Timeout => None,
+            ClientError::EventQueueFull => None,
         }
     }
 }
@@ -55,6 +57,10 @@ impl Display for ClientError {
             ClientError::UnsupportedVersion => write!(f, "IPC CLient got unsupported version from server"),
             ClientError::Poisoned => write!(f, "IPC CLient connection is poisoned. Drop the client and reconnect."),
             ClientError::Timeout => write!(f, "IPC CLient I/O timed out."),
+            ClientError::EventQueueFull => write!(
+                f,
+                "IPC Client event queue is full and events were dropped. Client should fetch fresh snapshot(s)"
+            ),
         }
     }
 }

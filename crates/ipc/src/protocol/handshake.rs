@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::bounded_vec;
 use crate::protocol::header::{MessageType, RequestType};
 
 // ---- Handshake and errors ----
@@ -10,14 +11,14 @@ use crate::protocol::header::{MessageType, RequestType};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Hello {
     pub versions: Vec<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "bounded_vec::bounded_vec::<_,_,64>")]
     pub features: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct HelloReply {
     pub version: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "bounded_vec::bounded_vec::<_,_,64>")]
     pub features: Vec<String>,
     /// e.g. "clipleafd 0.1.0", for diagnostics.
     pub daemon: Option<String>,
@@ -42,7 +43,6 @@ pub enum ErrorCode {
     UnknownRequest,
     BadRequest,
     NotFound,
-    TooManyConnections,
     UnsupportedVersion,
     Internal,
     Cancelled,

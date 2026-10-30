@@ -15,11 +15,26 @@ use crate::{
         Message, Request,
         codec::{decode_body, encode_frame},
         handshake::{ErrorReply, Hello},
-        header::{EventType, MAX_FRAME_LEN, MAX_REQUEST_LEN, MessageType},
+        header::{EventType, Header, MAX_FRAME_LEN, MAX_REQUEST_LEN, MessageType},
+        v1::models::{Added, Removed, SelectionChanged, Updated},
     },
 };
 
 const SUPPORTED_VERSION: u32 = 1;
+const EVENT_QUEUE_MAX_LEN: usize = 1024;
+
+enum Incoming<'a> {
+    Frame(Header, &'a [u8]),
+    Consumed,
+}
+
+pub enum Event {
+    Added(Added),
+    Updated(Updated),
+    Removed(Removed),
+    Cleared,
+    SelectionChanged(SelectionChanged),
+}
 
 pub struct Client {
     stream: UnixStream,
@@ -31,6 +46,7 @@ pub struct Client {
     conn_features: Vec<String>,
     conn_daemon: Option<String>,
     poisoned: bool,
+    event_queue_full: bool,
 }
 
 impl Client {
@@ -55,6 +71,7 @@ impl Client {
             conn_features: Vec::new(),
             conn_version: 0,
             poisoned: false,
+            event_queue_full: false,
         };
 
         client.set_timeout(read_write_timeout)?;
@@ -89,7 +106,7 @@ impl Client {
         let req_id = self.next_req_id;
 
         self.serialize_buf.clear();
-        encode_frame(req_id, req, &mut self.serialize_buf, MAX_REQUEST_LEN as usize)?;
+        encode_frame(req_id, req, &mut self.serialize_buf, MAX_REQUEST_LEN)?;
         log_debug!("Client: sending msg id {req_id} - {:?}({})", R::TYPE, self.serialize_buf.len());
         self.next_req_id = self.next_req_id.wrapping_add(1).max(1);
         if let Err(e) = self.stream.write_all(&self.serialize_buf) {
@@ -98,52 +115,121 @@ impl Client {
         }
 
         loop {
-            let mut result = None;
-            while let Some(res) = self.reader.next_frame() {
-                match res {
-                    Ok((header, body)) if header.req_id == req_id && header.msg_type == R::Reply::TYPE => {
-                        log_debug!("Client: got reply id {} - {:?}({})", req_id, R::Reply::TYPE, body.len());
-                        result = Some(Ok(decode_body::<R::Reply>(body)?));
+            match self.handle_next_frame(Some(req_id)) {
+                Some(incoming) => match incoming {
+                    Ok(Incoming::Frame(header, body)) => {
+                        log_debug!("Received reply for request ID {req_id} of type {:?}", header.msg_type);
+                        match header.msg_type {
+                            MessageType::Reply(_) if header.msg_type == R::Reply::TYPE => return Ok(decode_body::<R::Reply>(body)?),
+                            MessageType::Error => {
+                                let err = decode_body::<ErrorReply>(body)?;
+                                return Err(ClientError::ResponseError(err));
+                            }
+                            _ => return Err(ClientError::UnexpectedType(header.msg_type)),
+                        }
                     }
-                    Err(e) => {
-                        self.poisoned = true;
-                        return Err(ClientError::Protocol(e));
-                    }
-                    Ok((header, body)) => match header.msg_type {
-                        MessageType::Error if header.req_id == req_id => {
-                            let err = decode_body::<ErrorReply>(body)?;
-                            result = Some(Err(ClientError::ResponseError(err)));
-                        }
-                        MessageType::Error if header.req_id == 0 => {
-                            let err = decode_body::<ErrorReply>(body)?;
-                            result = Some(Err(ClientError::ConnectionError(err)));
-                        }
-                        MessageType::Event(event_type) => {
-                            log_debug!("Client: got event type {:?}({})", event_type, body.len());
-                            self.events.push_back((event_type, body.into()));
-                        }
-                        MessageType::Unknown(t) if header.req_id == req_id => {
-                            result = Some(Err(ClientError::UnexpectedType(MessageType::from_wire_u16(t))));
-                        }
-                        MessageType::Unknown(t) => {
-                            log_debug!("Unknown event type {:?}", MessageType::from_wire_u16(t));
-                            continue;
-                        }
-                        _ => continue,
-                    },
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                },
+                None => {
+                    self.fill_buffer()?;
                 }
             }
+        }
+    }
 
-            if let Some(r) = result {
-                return r;
+    pub fn next_event(&mut self) -> Result<Event, ClientError> {
+        #[inline(always)]
+        fn construct_event(event_type: EventType, body: &[u8]) -> Result<Event, ClientError> {
+            match event_type {
+                EventType::Added => Ok(Event::Added(decode_body(body)?)),
+                EventType::Updated => Ok(Event::Updated(decode_body(body)?)),
+                EventType::Removed => Ok(Event::Removed(decode_body(body)?)),
+                EventType::Cleared => Ok(Event::Cleared),
+                EventType::SelectionChanged => Ok(Event::SelectionChanged(decode_body(body)?)),
+            }
+        }
+
+        loop {
+            if std::mem::take(&mut self.event_queue_full) {
+                return Err(ClientError::EventQueueFull);
             }
 
+            if let Some(ev) = self.events.pop_front() {
+                return construct_event(ev.0, ev.1.as_slice());
+            }
+
+            if self.poisoned {
+                return Err(ClientError::Poisoned);
+            }
+
+            match self.handle_next_frame(None) {
+                Some(incoming) => match incoming {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                },
+                None => {
+                    self.fill_buffer()?;
+                }
+            }
+        }
+    }
+
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
+
+    fn handle_next_frame<'a>(&'a mut self, req_id: Option<u32>) -> Option<Result<Incoming<'a>, ClientError>> {
+        if let Some(res) = self.reader.next_frame() {
+            match res {
+                Err(e) => {
+                    self.poisoned = true;
+                    log_debug!("Got error response from FrameReader - marking client as poisoned.");
+                    return Some(Err(ClientError::Protocol(e)));
+                }
+                Ok((header, body)) => match header.msg_type {
+                    MessageType::Error if header.req_id == 0 => {
+                        let err = match decode_body::<ErrorReply>(body) {
+                            Ok(payload) => payload,
+                            Err(e) => return Some(Err(ClientError::Protocol(e))),
+                        };
+                        self.poisoned = true;
+                        return Some(Err(ClientError::ConnectionError(err)));
+                    }
+                    MessageType::Event(event_type) => {
+                        log_debug!("Client: got event type {:?}({})", event_type, body.len());
+                        if self.event_queue_full {
+                            // marked full = skip
+                        } else if self.events.len() >= EVENT_QUEUE_MAX_LEN {
+                            self.event_queue_full = true;
+                            self.events.clear();
+                        } else {
+                            self.events.push_back((event_type, body.into()));
+                        }
+                        return Some(Ok(Incoming::Consumed));
+                    }
+                    _ if req_id == Some(header.req_id) => return Some(Ok(Incoming::Frame(header, body))),
+                    _ => {
+                        log_debug!("Discarding frame with ID {} and type {:?}", header.req_id, header.msg_type);
+                        return Some(Ok(Incoming::Consumed));
+                    }
+                },
+            }
+        }
+
+        None
+    }
+
+    fn fill_buffer(&mut self) -> Result<usize, ClientError> {
+        loop {
             match self.reader.fill_from(&mut self.stream) {
                 Ok(0) => {
                     self.poisoned = true;
                     return Err(ClientError::EofClosed);
                 }
-                Ok(_) => {}
+                Ok(n) => {
+                    return Ok(n);
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
                     return Err(ClientError::Timeout);

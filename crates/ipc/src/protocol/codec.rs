@@ -4,7 +4,9 @@ use crate::protocol::{
     header::{HEADER_LEN, Header},
 };
 
-pub fn encode_frame<T: Message>(req_id: u32, message: &T, buffer: &mut Vec<u8>, max_allowed_len: usize) -> Result<(), ProtocolError> {
+const MAX_BODY_DEPTH: usize = 32;
+
+pub fn encode_frame<T: Message>(req_id: u32, message: &T, buffer: &mut Vec<u8>, max_allowed_len: u32) -> Result<(), ProtocolError> {
     let start = buffer.len();
     buffer.extend_from_slice(&[0; HEADER_LEN]);
     if let Err(e) = rmp_serde::encode::write_named(buffer, message) {
@@ -12,7 +14,7 @@ pub fn encode_frame<T: Message>(req_id: u32, message: &T, buffer: &mut Vec<u8>, 
         return Err(e.into());
     }
     let frame_len = buffer.len() - start;
-    if frame_len > max_allowed_len {
+    if frame_len > max_allowed_len as usize {
         buffer.truncate(start);
         return Err(ProtocolError::FrameTooBig);
     }
@@ -29,6 +31,7 @@ pub fn encode_frame<T: Message>(req_id: u32, message: &T, buffer: &mut Vec<u8>, 
 }
 
 pub fn decode_body<T: Message>(body: &[u8]) -> Result<T, ProtocolError> {
-    let msg = rmp_serde::decode::from_slice::<T>(body)?;
-    Ok(msg)
+    let mut de = rmp_serde::Deserializer::from_read_ref(body);
+    de.set_max_depth(MAX_BODY_DEPTH);
+    Ok(T::deserialize(&mut de)?)
 }
