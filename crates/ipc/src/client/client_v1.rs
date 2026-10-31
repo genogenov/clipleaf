@@ -1,12 +1,15 @@
 use std::{
     collections::VecDeque,
     io::{self, Write},
-    os::unix::net::UnixStream,
+    os::{fd::AsFd, unix::net::UnixStream},
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use clipleaf_core::log_debug;
+use clipleaf_core::{
+    ffi::poll::{PollEvents, PollFd, PollResult, poll},
+    log_debug,
+};
 
 use crate::{
     client::error::ClientError,
@@ -28,6 +31,7 @@ enum Incoming<'a> {
     Consumed,
 }
 
+#[derive(Debug)]
 pub enum Event {
     Added(Added),
     Updated(Updated),
@@ -74,7 +78,7 @@ impl Client {
             event_queue_full: false,
         };
 
-        client.set_timeout(read_write_timeout)?;
+        client.set_call_timeout(read_write_timeout)?;
 
         let hello = Hello {
             features: Vec::new(),
@@ -82,6 +86,7 @@ impl Client {
         };
 
         let response = client.call(&hello)?;
+        log_debug!("Got Hello reply: {response:?}");
 
         if response.version != SUPPORTED_VERSION {
             return Err(ClientError::UnsupportedVersion);
@@ -94,7 +99,7 @@ impl Client {
         Ok(client)
     }
 
-    pub fn set_timeout(&mut self, duration: Option<Duration>) -> io::Result<()> {
+    pub fn set_call_timeout(&mut self, duration: Option<Duration>) -> io::Result<()> {
         self.stream.set_read_timeout(duration)?;
         self.stream.set_write_timeout(duration)
     }
@@ -138,15 +143,16 @@ impl Client {
         }
     }
 
-    pub fn next_event(&mut self) -> Result<Event, ClientError> {
+    pub fn next_event(&mut self, timeout: Option<Duration>) -> Result<Option<Event>, ClientError> {
+        let start = Instant::now();
         #[inline(always)]
-        fn construct_event(event_type: EventType, body: &[u8]) -> Result<Event, ClientError> {
+        fn construct_event(event_type: EventType, body: &[u8]) -> Result<Option<Event>, ClientError> {
             match event_type {
-                EventType::Added => Ok(Event::Added(decode_body(body)?)),
-                EventType::Updated => Ok(Event::Updated(decode_body(body)?)),
-                EventType::Removed => Ok(Event::Removed(decode_body(body)?)),
-                EventType::Cleared => Ok(Event::Cleared),
-                EventType::SelectionChanged => Ok(Event::SelectionChanged(decode_body(body)?)),
+                EventType::Added => Ok(Some(Event::Added(decode_body(body)?))),
+                EventType::Updated => Ok(Some(Event::Updated(decode_body(body)?))),
+                EventType::Removed => Ok(Some(Event::Removed(decode_body(body)?))),
+                EventType::Cleared => Ok(Some(Event::Cleared)),
+                EventType::SelectionChanged => Ok(Some(Event::SelectionChanged(decode_body(body)?))),
             }
         }
 
@@ -169,6 +175,13 @@ impl Client {
                     Err(e) => return Err(e),
                 },
                 None => {
+                    let mut fds = [PollFd::new(self.stream.as_fd(), PollEvents::IN)];
+                    let remaining = timeout.map(|t| t.saturating_sub(Instant::now().saturating_duration_since(start)));
+                    match poll(&mut fds, remaining)? {
+                        PollResult::Timeout => return Ok(None),
+                        PollResult::Ready(_) => {}
+                    }
+
                     self.fill_buffer()?;
                 }
             }

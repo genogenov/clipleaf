@@ -19,13 +19,17 @@
 //! compositor) and every `set_selection`, and a test pastes from a source with `paste`.
 #![allow(dead_code)] // each test file uses a different part
 
+pub mod ipc;
 pub mod wal;
 
 use std::{
     collections::VecDeque,
     fs,
     io::{Read, Write},
-    os::fd::{AsFd, OwnedFd},
+    os::{
+        fd::{AsFd, OwnedFd},
+        unix::fs::DirBuilderExt,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicU32, Ordering},
@@ -114,6 +118,40 @@ impl Drop for StateDir {
     }
 }
 
+/// `$XDG_RUNTIME_DIR` for one test (mode 0700, as a login session's): the daemon keeps its
+/// IPC socket and runtime lock in `<root>/clipleaf`. Removed when the test ends.
+pub struct RuntimeDir(PathBuf);
+
+impl RuntimeDir {
+    pub fn new() -> Self {
+        static N: AtomicU32 = AtomicU32::new(0);
+        // Short: the socket path must fit in sun_path (108 bytes).
+        let root = std::env::temp_dir().join(format!("clipleafd-run-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let _ = fs::remove_dir_all(&root);
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        Self(root)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.0
+    }
+
+    /// `<root>/clipleaf`, the daemon's own dir.
+    pub fn dir(&self) -> PathBuf {
+        self.0.join("clipleaf")
+    }
+
+    pub fn socket(&self) -> PathBuf {
+        self.0.join(clipleaf_ipc::RELATIVE_SOCKET_PATH)
+    }
+}
+
+impl Drop for RuntimeDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 /// `<id>.<n>` → `(id, n)`; anything else sorts last.
 pub fn id_and_type(name: &str) -> (u64, u64) {
     name.split_once('.')
@@ -160,8 +198,10 @@ pub struct Daemon {
     fds: VecDeque<OwnedFd>,
     child: Option<Guarded>,
     next_offer: u32,
+    socket: PathBuf,
     _comp: RawCompositor,
     _own_state: Option<StateDir>,
+    _own_runtime: Option<RuntimeDir>,
 }
 
 impl Daemon {
@@ -173,15 +213,24 @@ impl Daemon {
         daemon
     }
 
-    /// Starts `clipleafd` on a fresh raw compositor with the history in `state`, and answers
-    /// its registry round trip.
+    /// Starts `clipleafd` on a fresh raw compositor with the history in `state` and a runtime
+    /// dir of its own, and answers its registry round trip.
     pub fn start_in(state: &StateDir) -> Self {
+        let runtime = RuntimeDir::new();
+        let mut daemon = Self::start_with(state, &runtime);
+        daemon._own_runtime = Some(runtime);
+        daemon
+    }
+
+    /// As `start_in`, with `$XDG_RUNTIME_DIR` = `runtime`.
+    pub fn start_with(state: &StateDir, runtime: &RuntimeDir) -> Self {
         let comp = RawCompositor::new();
         let mut command = Command::new(env!("CARGO_BIN_EXE_clipleafd"));
         command
             .env_clear()
             .env("WAYLAND_DISPLAY", comp.path())
             .env("XDG_STATE_HOME", state.root())
+            .env("XDG_RUNTIME_DIR", runtime.root())
             .stdin(Stdio::null())
             .stdout(Stdio::null());
         match std::env::var("CLIPLEAF_TEST_LOG") {
@@ -212,8 +261,10 @@ impl Daemon {
             fds: VecDeque::new(),
             child: Some(Guarded::new(child)),
             next_offer: SERVER_ID_START,
+            socket: runtime.socket(),
             _comp: comp,
             _own_state: None,
+            _own_runtime: None,
         };
         // Device events only make sense once the device exists: wait for get_data_device.
         let mut seen = Vec::new();
@@ -222,7 +273,13 @@ impl Daemon {
             .any(|r: &Request| r.object_id == MANAGER && r.opcode == MANAGER_GET_DATA_DEVICE)
         {
             daemon.wait_readable("get_data_device");
-            seen.extend(daemon.peer.requests());
+            let requests = daemon.peer.requests();
+            // Readable with nothing to read is EOF: the daemon hung up (it failed at startup).
+            if requests.is_empty() {
+                let status = daemon.child.as_mut().unwrap().child().try_wait().unwrap();
+                panic!("clipleafd hung up before get_data_device (exit status: {status:?})");
+            }
+            seen.extend(requests);
         }
         // The history is restored (and the log cut or reset) before the daemon connects.
         daemon.seen = wal::records(&fs::read(&daemon.wal).unwrap()).len();
@@ -257,11 +314,29 @@ impl Daemon {
         drop(self.child.take());
     }
 
-    /// Kills the compositor connection and returns how the daemon exited.
+    /// Kills the compositor connection and returns how the daemon exited (within `WAIT`).
     pub fn hang_up(self) -> std::process::ExitStatus {
         let Daemon { peer, child, .. } = self;
         peer.close();
-        child.unwrap().wait()
+        let mut child = child.unwrap();
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.child().try_wait().unwrap() {
+                return status;
+            }
+            assert!(start.elapsed() < WAIT, "clipleafd kept running after the compositor went away");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// The daemon's IPC socket path (`$XDG_RUNTIME_DIR/clipleaf/daemon.sock`).
+    pub fn socket(&self) -> &Path {
+        &self.socket
+    }
+
+    /// How the daemon exited, if it has.
+    pub fn exited(&mut self) -> Option<std::process::ExitStatus> {
+        self.child.as_mut().unwrap().child().try_wait().unwrap()
     }
 
     pub fn wait_readable(&self, what: &str) {

@@ -1,13 +1,15 @@
 use std::{
     env,
-    fs::{DirBuilder, File, OpenOptions},
+    fs::{DirBuilder, File},
     io::{self},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    os::unix::fs::DirBuilderExt,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use clipleaf_core::log_debug;
+
+use crate::storage::lock_file;
 
 const DEFAULT_DIR: &str = "XDG_STATE_HOME";
 const HOME_DIR: &str = "HOME";
@@ -40,20 +42,8 @@ impl FsDataStore {
     }
 
     pub fn lock(&mut self) -> io::Result<()> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(self.base.join("lock"))?;
-        match file.try_lock() {
-            Ok(()) => {
-                self.lock = Some(file);
-                Ok(())
-            }
-            Err(std::fs::TryLockError::Error(e)) => Err(e),
-            Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::other("another clipleafd already running")),
-        }
+        self.lock = Some(lock_file(&self.base.join("lock"), 0o600)?);
+        Ok(())
     }
 
     pub fn payloads_dir(&self) -> Arc<Path> {

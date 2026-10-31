@@ -104,7 +104,7 @@ impl Drop for PayloadWriter {
             let path = payload.payload_path(&self.file_path_base, self.entry_id);
             log_debug!("Dropping unfinished file at {}", path.display());
             if let Err(e) = fs::remove_file(&path) {
-                log_error!("…: {e}");
+                log_error!("Failed to drop file: {e}");
             }
         }
     }

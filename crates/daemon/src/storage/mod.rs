@@ -1,5 +1,6 @@
 mod entry;
 mod fs_store;
+mod lock;
 mod payload;
 
 pub mod wal;
@@ -10,4 +11,5 @@ pub const MAX_ENTRY_ID: u64 = (1 << 53) - 1;
 
 pub use entry::*;
 pub use fs_store::*;
+pub use lock::*;
 pub use payload::*;

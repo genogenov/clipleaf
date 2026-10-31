@@ -96,6 +96,7 @@ name = "clipleafd"
 version = "0.1.0"
 dependencies = [
  "clipleaf-core",
+ "clipleaf-ipc",
  "clipleaf-test-common",
  "image",
  "jpeg-encoder",

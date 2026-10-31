@@ -38,6 +38,11 @@ fn list() -> List {
     }
 }
 
+/// `next_event` bounded by GUARD, so a broken client fails the test instead of hanging it.
+fn next(c: &mut Client) -> Result<Event, ClientError> {
+    c.next_event(Some(GUARD)).map(|ev| ev.expect("no event within GUARD"))
+}
+
 fn expect_removed(ev: Result<Event, ClientError>) -> u64 {
     match ev {
         Ok(Event::Removed(r)) => r.id,
@@ -97,17 +102,17 @@ fn events_before_reply_are_queued_in_order() {
     });
     let mut c = d.connect();
     assert_eq!(c.call(&Status {}).unwrap(), status_reply(9));
-    match c.next_event() {
+    match next(&mut c) {
         Ok(Event::Added(a)) => assert_eq!(a.entry, sample_entry(1)),
         _ => panic!("expected Added"),
     }
-    assert_eq!(expect_removed(c.next_event()), 2);
-    assert!(matches!(c.next_event(), Ok(Event::Cleared)));
-    match c.next_event() {
+    assert_eq!(expect_removed(next(&mut c)), 2);
+    assert!(matches!(next(&mut c), Ok(Event::Cleared)));
+    match next(&mut c) {
         Ok(Event::SelectionChanged(s)) => assert_eq!((s.selection, s.id), (EventSelection::Primary, Some(4))),
         _ => panic!("expected SelectionChanged"),
     }
-    match c.next_event() {
+    match next(&mut c) {
         Ok(Event::Updated(u)) => assert_eq!(u.entry, sample_entry(5)),
         _ => panic!("expected Updated"),
     }
@@ -133,7 +138,7 @@ fn event_and_reply_in_one_write_returns_promptly() {
     let took = start.elapsed();
     assert!(res.is_ok(), "{:?}", res.err());
     assert!(took < Duration::from_millis(500), "call took {took:?}");
-    assert_eq!(expect_removed(c.next_event()), 7);
+    assert_eq!(expect_removed(next(&mut c)), 7);
     drop(c);
     d.join();
 }
@@ -156,7 +161,7 @@ fn handshake_reply_and_event_in_one_write() {
     });
     let mut c = d.connect();
     // the event read together with the HelloReply is not lost
-    assert_eq!(expect_removed(c.next_event()), 1);
+    assert_eq!(expect_removed(next(&mut c)), 1);
     drop(c);
     d.join();
 }
@@ -170,7 +175,7 @@ fn next_event_blocks_until_an_event_arrives() {
         p.wait_close();
     });
     let mut c = d.connect();
-    assert_eq!(expect_removed(c.next_event()), 11);
+    assert_eq!(expect_removed(next(&mut c)), 11);
     drop(c);
     d.join();
 }
@@ -286,7 +291,7 @@ fn unknown_event_index_and_unknown_category_with_req_id_0_are_skipped() {
     let mut c = d.connect();
     assert_eq!(c.call(&Status {}).unwrap().entries, 2);
     // only the known event was queued
-    assert_eq!(expect_removed(c.next_event()), 5);
+    assert_eq!(expect_removed(next(&mut c)), 5);
     d.join();
 }
 
@@ -323,10 +328,10 @@ fn exactly_1024_queued_events_do_not_overflow() {
     let mut c = d.connect();
     c.call(&Status {}).unwrap();
     for i in 0..1024 {
-        assert_eq!(expect_removed(c.next_event()), i);
+        assert_eq!(expect_removed(next(&mut c)), i);
     }
     c.call(&Status {}).unwrap();
-    assert_eq!(expect_removed(c.next_event()), 7777);
+    assert_eq!(expect_removed(next(&mut c)), 7777);
     d.join();
 }
 
@@ -349,11 +354,11 @@ fn event_queue_overflow_reports_once_then_delivers_new_events() {
     });
     let mut c = d.connect();
     assert_eq!(c.call(&Status {}).unwrap().entries, 1);
-    assert!(matches!(c.next_event(), Err(ClientError::EventQueueFull)));
+    assert!(matches!(next(&mut c), Err(ClientError::EventQueueFull)));
     assert_eq!(c.call(&Status {}).unwrap().entries, 2);
     // none of the 1100 dropped events resurface, and the gap is reported only once
-    assert_eq!(expect_removed(c.next_event()), 5000);
-    assert_eq!(expect_removed(c.next_event()), 5001);
+    assert_eq!(expect_removed(next(&mut c)), 5000);
+    assert_eq!(expect_removed(next(&mut c)), 5001);
     d.join();
 }
 
@@ -373,9 +378,9 @@ fn exactly_1025_events_overflow() {
     });
     let mut c = d.connect();
     c.call(&Status {}).unwrap();
-    assert!(matches!(c.next_event(), Err(ClientError::EventQueueFull)));
+    assert!(matches!(next(&mut c), Err(ClientError::EventQueueFull)));
     // sent after the overflow was reported -> delivered
-    assert_eq!(expect_removed(c.next_event()), 9000);
+    assert_eq!(expect_removed(next(&mut c)), 9000);
     drop(c);
     d.join();
 }
@@ -395,7 +400,7 @@ fn daemon_close_is_eof_then_poisoned() {
     d.join();
     let res = c.call(&Status {});
     assert!(matches!(res, Err(ClientError::Poisoned)), "{:?}", res.err());
-    let ev = c.next_event();
+    let ev = next(&mut c);
     assert!(matches!(ev, Err(ClientError::Poisoned)), "{:?}", ev.err());
 }
 
@@ -407,9 +412,9 @@ fn eof_in_next_event_is_eof_closed() {
     });
     let mut c = d.connect();
     d.join();
-    assert_eq!(expect_removed(c.next_event()), 1);
-    assert!(matches!(c.next_event(), Err(ClientError::EofClosed)));
-    assert!(matches!(c.next_event(), Err(ClientError::Poisoned)));
+    assert_eq!(expect_removed(next(&mut c)), 1);
+    assert!(matches!(next(&mut c), Err(ClientError::EofClosed)));
+    assert!(matches!(next(&mut c), Err(ClientError::Poisoned)));
 }
 
 #[test]
@@ -459,13 +464,13 @@ fn timeout_does_not_poison_and_late_reply_is_dropped() {
         "timeout after {took:?}"
     );
     tx.send(()).unwrap();
-    c.set_timeout(Some(GUARD)).unwrap();
+    c.set_call_timeout(Some(GUARD)).unwrap();
     assert_eq!(c.call(&Status {}).unwrap().entries, 222);
     d.join();
 }
 
 #[test]
-fn timeout_in_next_event_does_not_poison() {
+fn next_event_timeout_is_none_and_does_not_poison() {
     let (tx, rx) = mpsc::channel::<()>();
     let d = Daemon::spawn(move |mut p| {
         p.handshake();
@@ -473,11 +478,18 @@ fn timeout_in_next_event_does_not_poison() {
         p.send(0, &Removed { id: 3 });
         p.wait_close();
     });
-    let mut c = Client::connect_handshake(&d.path, 4096, 4096, Some(Duration::from_millis(100))).unwrap();
-    assert!(matches!(c.next_event(), Err(ClientError::Timeout)));
+    // The call timeout (SO_RCVTIMEO) must not bound next_event: only its own argument does.
+    let mut c = Client::connect_handshake(&d.path, 4096, 4096, Some(Duration::from_millis(10))).unwrap();
+    assert!(matches!(c.next_event(Some(Duration::ZERO)), Ok(None)));
+    let start = Instant::now();
+    assert!(matches!(c.next_event(Some(Duration::from_millis(200))), Ok(None)));
+    let took = start.elapsed();
+    assert!(
+        took >= Duration::from_millis(150) && took < Duration::from_millis(1500),
+        "timeout after {took:?}"
+    );
     tx.send(()).unwrap();
-    c.set_timeout(Some(GUARD)).unwrap();
-    assert_eq!(expect_removed(c.next_event()), 3);
+    assert_eq!(expect_removed(next(&mut c)), 3);
     drop(c);
     d.join();
 }

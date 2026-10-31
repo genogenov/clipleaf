@@ -74,13 +74,16 @@ fn a_second_daemon_on_the_same_history_exits_with_an_error() {
     first.copy_new(&[(UTF8, b"kept by the first")]);
     let wal = state.wal_bytes();
 
-    // A compositor of its own, so a second daemon that got past the lock would connect.
+    // A compositor and a runtime dir of its own, so the second daemon gets as far as the
+    // history's lock, and one that got past it would connect.
     let comp = RawCompositor::new();
+    let runtime = RuntimeDir::new();
     let mut second = Guarded::new(
         Command::new(env!("CARGO_BIN_EXE_clipleafd"))
             .env_clear()
             .env("WAYLAND_DISPLAY", comp.path())
             .env("XDG_STATE_HOME", state.root())
+            .env("XDG_RUNTIME_DIR", runtime.root())
             .env("CLIPLEAF_LOG", "off")
             .stdin(Stdio::null())
             .stdout(Stdio::null())

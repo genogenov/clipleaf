@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 mod image;
 mod index;
+mod ipc;
 mod jobs;
 mod offer;
 mod storage;
@@ -22,6 +23,7 @@ use clipleaf_core::{
 
 use crate::{
     index::SnapshotHandle,
+    ipc::server::IpcServer,
     jobs::{JobData, JobId, JobList, JobOutcome, JobResult},
     offer::{
         DataOwner, MAX_FETCHED_TYPES, MAX_PENDING_SERVES, RESTORE_ON_CLEAR, RESTORE_ON_START, TRACK_PRIMARY_SELECTION,
@@ -50,12 +52,21 @@ struct Daemon {
     pending_primary_fetch: Option<JobId>,
     pending_main_restore: Option<JobId>,
     pending_primary_restore: Option<JobId>,
+    _server: IpcServer,
     _store: FsDataStore,
 }
 impl Daemon {
     fn init() -> io::Result<Self> {
         let mut seq_counter: u64 = 1;
         let mut store = FsDataStore::open_data_store_dir(None)?;
+
+        let mut server = match IpcServer::init() {
+            Ok(s) => s,
+            Err(err) => {
+                return Err(io::Error::new(err.kind(), format!("Failed to init IPC server: {}", err)));
+            }
+        };
+
         store.lock()?;
 
         let (log_tx, restored) = match init_wal(&store, &mut seq_counter) {
@@ -84,6 +95,14 @@ impl Daemon {
         let session = WlSessionManager::initialize(stream)?;
         let jobs = JobList::new()?;
         let payloads_dir = store.payloads_dir();
+
+        match server.start() {
+            Ok(s) => s,
+            Err(err) => {
+                return Err(io::Error::new(err.kind(), format!("Failed to start IPC server: {}", err)));
+            }
+        };
+
         Ok(Self {
             data_owner,
             jobs,
@@ -96,6 +115,7 @@ impl Daemon {
             pending_main_restore: None,
             pending_primary_fetch: None,
             pending_primary_restore: None,
+            _server: server,
             _store: store,
         })
     }

@@ -1,7 +1,7 @@
 use std::{
     io::{self, Error, ErrorKind},
     marker::PhantomData,
-    ops::BitOr,
+    ops::{BitOr, BitOrAssign},
     os::fd::{AsRawFd, BorrowedFd},
     time::{Duration, Instant},
 };
@@ -26,6 +26,12 @@ impl BitOr for PollEvents {
     type Output = Self;
     fn bitor(self, r: Self) -> Self {
         Self(self.0 | r.0)
+    }
+}
+
+impl BitOrAssign for PollEvents {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
     }
 }
 
