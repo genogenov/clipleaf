@@ -8,7 +8,6 @@ pub enum RequestType {
     Hello = 1,
     Status,
     List,
-    Get,
     Restore,
     Pin,
     Delete,
@@ -107,7 +106,6 @@ const fn make_req_types() -> [Option<RequestType>; u8::MAX as usize + 1] {
     arr[RequestType::Hello as usize] = Some(RequestType::Hello);
     arr[RequestType::Status as usize] = Some(RequestType::Status);
     arr[RequestType::List as usize] = Some(RequestType::List);
-    arr[RequestType::Get as usize] = Some(RequestType::Get);
     arr[RequestType::Restore as usize] = Some(RequestType::Restore);
     arr[RequestType::Pin as usize] = Some(RequestType::Pin);
     arr[RequestType::Delete as usize] = Some(RequestType::Delete);

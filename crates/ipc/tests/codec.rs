@@ -143,32 +143,6 @@ fn every_message_round_trips() {
             }
         }
     }
-    round_trip(
-        Get {
-            id: 5,
-            mime: Some("text/plain".into()),
-        },
-        req(R::Get),
-    );
-    round_trip(Get { id: 5, mime: None }, req(R::Get));
-    round_trip(
-        GetReply {
-            id: 5,
-            mime: "image/png".into(),
-            size: 3,
-            data: Some(vec![0, 0xff, 7]),
-        },
-        rep(R::Get),
-    );
-    round_trip(
-        GetReply {
-            id: 5,
-            mime: "image/png".into(),
-            size: 3,
-            data: None,
-        },
-        rep(R::Get),
-    );
     for selection in [Selection::Clipboard, Selection::Primary, Selection::Both] {
         for formats in [Formats::All, Formats::Text, Formats::Mime] {
             round_trip(
@@ -227,7 +201,7 @@ fn encode_frame_appends_after_existing_content() {
     encode_frame(3, &Delete { id: 5 }, &mut buf, MAX_FRAME_LEN).unwrap();
     assert_eq!(&buf[..6], b"prefix");
     let frame = &buf[6..];
-    assert_eq!(&frame[..HEADER_LEN], &[5, 0, 0, 0, 1, 7, 0, 0, 3, 0, 0, 0]);
+    assert_eq!(&frame[..HEADER_LEN], &[5, 0, 0, 0, 1, 6, 0, 0, 3, 0, 0, 0]);
     assert_eq!(&frame[HEADER_LEN..], &[0x81, 0xa2, b'i', b'd', 5]);
 }
 
@@ -244,12 +218,9 @@ fn encode_frame_over_cap_truncates_back_to_prior_content() {
     assert_eq!(buf, b"prior");
 
     let mut buf = Vec::new();
-    let big = GetReply {
-        id: 1,
-        mime: "x".into(),
-        size: 0,
-        data: Some(vec![0; 70_000]),
-    };
+    let mut entry = sample_entry(1);
+    entry.preview = vec![0; 70_000];
+    let big = Added { entry };
     assert!(matches!(encode_frame(1, &big, &mut buf, 64 * 1024), Err(ProtocolError::FrameTooBig)));
     assert!(buf.is_empty());
 }
@@ -284,22 +255,20 @@ fn bodies_are_named_maps_with_snake_case_strings_and_bin_bytes() {
         expected
     );
 
-    let mut expected = vec![0x84, 0xa2, b'i', b'd', 1, 0xa4];
-    expected.extend(b"mime");
-    expected.extend([0xa1, b'a', 0xa4]);
-    expected.extend(b"size");
-    expected.extend([2, 0xa4]);
-    expected.extend(b"data");
-    expected.extend([0xc4, 2, 9, 9]);
-    assert_eq!(
-        body_of(&GetReply {
-            id: 1,
-            mime: "a".into(),
-            size: 2,
-            data: Some(vec![9, 9])
-        }),
-        expected
-    );
+    // Byte fields are bin (0xc4 len bytes), not arrays: the preview and the thumbnail data.
+    let mut entry = sample_entry(1);
+    entry.preview = vec![9, 9];
+    entry.thumb.as_mut().unwrap().data = Some(vec![7, 7, 7]);
+    let body = body_of(&Added { entry });
+    let mut preview = vec![0xa7];
+    preview.extend(b"preview");
+    preview.extend([0xc4, 2, 9, 9]);
+    let mut data = vec![0xa4];
+    data.extend(b"data");
+    data.extend([0xc4, 3, 7, 7, 7]);
+    for field in [preview, data] {
+        assert!(body.windows(field.len()).any(|w| w == field), "{field:x?} not in {body:x?}");
+    }
 
     let mut expected = vec![0x82, 0xa4];
     expected.extend(b"code");
@@ -410,13 +379,6 @@ struct ErrorV0 {
 }
 
 #[derive(Serialize, Deserialize)]
-struct GetReplyV0 {
-    id: u64,
-    mime: String,
-    size: u64,
-}
-
-#[derive(Serialize, Deserialize)]
 struct StatusReplyPartial {
     entries: u64,
     pinned: u64,
@@ -438,7 +400,6 @@ test_message! {
     HelloV0 => MessageType::Request(RequestType::Hello);
     HelloReplyV0 => MessageType::Reply(RequestType::Hello);
     ErrorV0 => MessageType::Error;
-    GetReplyV0 => MessageType::Reply(RequestType::Get);
     StatusReplyPartial => MessageType::Reply(RequestType::Status);
     RestoreNoSelection => MessageType::Request(RequestType::Restore);
 }
@@ -541,20 +502,12 @@ fn missing_defaulted_and_optional_fields_decode() {
             message: String::new()
         }
     );
-    assert_eq!(
-        decode_body::<GetReply>(&body_of(&GetReplyV0 {
-            id: 1,
-            mime: "m".into(),
-            size: 0
-        }))
-        .unwrap(),
-        GetReply {
-            id: 1,
-            mime: "m".into(),
-            size: 0,
-            data: None
-        }
-    );
+    // An optional bin field (serde_bytes) that is missing: RawThumb has no `data`.
+    let old = decode_body::<Added>(&body_of(&RawAdded {
+        entry: raw_entry("image", None, "ready"),
+    }))
+    .unwrap();
+    assert_eq!(old.entry.thumb.unwrap().data, None);
     // Option fields missing
     assert_eq!(
         decode_body::<StatusReply>(&body_of(&StatusReply {
@@ -726,22 +679,6 @@ fn hostile_bodies_never_panic() {
             total: 2,
         }),
         7,
-    );
-    hostile::<Get>(
-        &body_of(&Get {
-            id: 1,
-            mime: Some("m".into()),
-        }),
-        8,
-    );
-    hostile::<GetReply>(
-        &body_of(&GetReply {
-            id: 1,
-            mime: "m".into(),
-            size: 2,
-            data: Some(vec![1, 2]),
-        }),
-        9,
     );
     hostile::<Restore>(
         &body_of(&Restore {

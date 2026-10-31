@@ -529,7 +529,7 @@ fn every_request_type_reaches_the_daemon_with_its_type() {
     let d = Daemon::spawn(|mut p| {
         p.handshake();
         let mut types = Vec::new();
-        for _ in 0..8 {
+        for _ in 0..7 {
             let f = p.recv();
             types.push(f.msg_type);
             p.send(
@@ -545,7 +545,6 @@ fn every_request_type_reaches_the_daemon_with_its_type() {
     let mut c = d.connect();
     let _ = c.call(&Status {});
     let _ = c.call(&list());
-    let _ = c.call(&Get { id: 1, mime: None });
     let _ = c.call(&Restore {
         id: 1,
         selection: Selection::Both,
@@ -559,7 +558,6 @@ fn every_request_type_reaches_the_daemon_with_its_type() {
     let want: Vec<_> = [
         RequestType::Status,
         RequestType::List,
-        RequestType::Get,
         RequestType::Restore,
         RequestType::Pin,
         RequestType::Delete,

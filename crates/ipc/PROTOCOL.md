@@ -62,13 +62,11 @@ The pair `(category, index)` identifies the message. A reply has the same `index
 | `Hello`    | 1 | `01 01` | `02 01` | Must be the first frame. |
 | `Status`   | 2 | `01 02` | `02 02` | |
 | `List`     | 3 | `01 03` | `02 03` | |
-| `Get`      | 4 | `01 04` | `02 04` | |
-| `Restore`  | 5 | `01 05` | `02 05` | |
-| `Pin`      | 6 | `01 06` | `02 06` | |
-| `Delete`   | 7 | `01 07` | `02 07` | |
-| `Clear`    | 8 | `01 08` | `02 08` | |
-| `Subscribe`| 9 | `01 09` | `02 09` | |
-| reserved   | 10 | `01 0A` | `02 0A` | Planned: `Paste`. |
+| `Restore`  | 4 | `01 04` | `02 04` | |
+| `Pin`      | 5 | `01 05` | `02 05` | |
+| `Delete`   | 6 | `01 06` | `02 06` | |
+| `Clear`    | 7 | `01 07` | `02 07` | |
+| `Subscribe`| 8 | `01 08` | `02 08` | |
 
 | Event              | index | Frame |
 |--------------------|------:|-------|
@@ -110,7 +108,7 @@ Rules, which keep old and new peers compatible:
   `file_count` are `u32`; `orientation` is `u8` (see each field in §6). On the wire any
   MessagePack integer format may carry the value (encoders write the smallest one).
   Ids stay at or below 2^53 − 1, so JSON-based and JavaScript clients can hold them exactly.
-- **Byte fields** (`preview`, thumbnail `data`, `Get` `data`) are MessagePack `bin`, not arrays.
+- **Byte fields** (`preview`, thumbnail `data`) are MessagePack `bin`, not arrays.
 - **Empty messages** are an empty map `{}` (byte `0x80`), so a later version can add fields.
 - **Enum-like fields** are snake_case strings. Where an unknown value has a safe meaning, a
   receiver maps it to a fallback:
@@ -204,16 +202,6 @@ ListReply { entries: [EntrySummary], total: u64 }
 - `thumbs`: include thumbnail image bytes (`thumb.data`). Without it, `thumb` still
   carries the state and dimensions.
 
-### `Get`
-```
-Get      { id: u64, mime: string? }
-GetReply { id: u64, mime: string, size: u64, data: bin? }
-```
-- `mime` `nil` means the entry's first (preferred) type.
-- Types up to 5 KiB come back inline in `data`. **Open:** how larger, file-backed types are
-  delivered is not decided yet.
-- Unknown `id` or `mime`: `Error` `not_found`.
-
 ### `Restore`
 ```
 Restore      { id: u64, selection: "clipboard"|"primary"|"both",
@@ -255,7 +243,7 @@ Starts the event stream on this connection (§7). `thumbs` works as it does in `
 EntrySummary {
   id: u64, kind: string, time_ms: u64, pinned: bool,
   size: u64,                 // all stored types together, in bytes
-  preview: bin,              // up to 256 characters from the start; UTF-8 for text kinds
+  preview: bin,              // up to 1000 characters (≤ 4000 bytes) from the start; UTF-8 for text kinds
   types: [{ mime: string, size: u64 }],
   thumb: Thumb?,             // images only
   file_count: u32?,          // file lists only

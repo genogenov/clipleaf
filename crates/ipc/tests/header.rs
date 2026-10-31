@@ -2,11 +2,10 @@
 
 use clipleaf_ipc::protocol::header::{EventType, HEADER_LEN, Header, MAX_FRAME_LEN, MAX_REQUEST_LEN, MessageType, RequestType};
 
-const ALL_REQUESTS: [RequestType; 9] = [
+const ALL_REQUESTS: [RequestType; 8] = [
     RequestType::Hello,
     RequestType::Status,
     RequestType::List,
-    RequestType::Get,
     RequestType::Restore,
     RequestType::Pin,
     RequestType::Delete,
@@ -53,7 +52,7 @@ fn encode_pins_exact_wire_bytes() {
 
 #[test]
 fn decode_pins_exact_wire_bytes() {
-    let h = Header::decode(&[0xFF, 0xFF, 0xFF, 0xFF, 2, 9, 1, 0x80, 0x01, 0x00, 0x00, 0x80]);
+    let h = Header::decode(&[0xFF, 0xFF, 0xFF, 0xFF, 2, 8, 1, 0x80, 0x01, 0x00, 0x00, 0x80]);
     assert_eq!(h.len, u32::MAX);
     assert_eq!(h.msg_type, MessageType::Reply(RequestType::Subscribe));
     assert_eq!(h.nfds, 1);
@@ -124,10 +123,10 @@ fn unknown_types_are_unknown_and_keep_their_wire_value() {
         (3, 1),
         (3, 255),
         (1, 0),
-        (1, 10),
+        (1, 9),
         (1, 255),
         (2, 0),
-        (2, 10),
+        (2, 9),
         (2, 255),
         (4, 0),
         (4, 6),

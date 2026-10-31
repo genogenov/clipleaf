@@ -89,7 +89,7 @@ pub struct EntrySummary {
     pub pinned: bool,
     /// Total size of all stored types in bytes.
     pub size: u64,
-    /// At most 256 characters cut from the head (UTF-8 for text kinds; may end mid-line).
+    /// At most 1000 characters cut from the head (UTF-8 for text kinds; may end mid-line).
     #[serde(with = "serde_bytes")]
     pub preview: Vec<u8>,
     #[serde(deserialize_with = "bounded_vec::bounded_vec::<_,_,256>")]
@@ -163,23 +163,6 @@ pub struct ListReply {
     pub entries: Vec<EntrySummary>,
     /// Entries matching the request in total (for paging).
     pub total: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Get {
-    pub id: u64,
-    /// None = the entry's first (preferred) type.
-    pub mime: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct GetReply {
-    pub id: u64,
-    pub mime: String,
-    pub size: u64,
-    /// Inline content (types ≤ 5 KiB). File-backed delivery is decided at 4e.
-    #[serde(default, with = "serde_bytes")]
-    pub data: Option<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -269,8 +252,6 @@ message! {
     StatusReply => MessageType::Reply(RequestType::Status);
     List => MessageType::Request(RequestType::List);
     ListReply => MessageType::Reply(RequestType::List);
-    Get => MessageType::Request(RequestType::Get);
-    GetReply => MessageType::Reply(RequestType::Get);
     Restore => MessageType::Request(RequestType::Restore);
     RestoreReply => MessageType::Reply(RequestType::Restore);
     Pin => MessageType::Request(RequestType::Pin);
@@ -291,7 +272,6 @@ message! {
 request! {
     Status => StatusReply;
     List => ListReply;
-    Get => GetReply;
     Restore => RestoreReply;
     Pin => PinReply;
     Delete => DeleteReply;

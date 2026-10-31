@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use clipleaf_ipc::protocol::{
     codec::decode_body,
     handshake::Hello,
-    v1::models::{GetReply, List, ListReply},
+    v1::models::{List, ListReply, Restore},
 };
 
 fn vm_hwm_kib() -> u64 {
@@ -26,6 +26,16 @@ fn key(k: &str) -> Vec<u8> {
 fn one_field(k: &str, prefix: &[u8]) -> Vec<u8> {
     let mut v = vec![0x81];
     v.extend(key(k));
+    v.extend(prefix);
+    v
+}
+
+/// {entries: [{preview: <prefix>}]}: a byte field one level down.
+fn entries_preview(prefix: &[u8]) -> Vec<u8> {
+    let mut v = vec![0x81];
+    v.extend(key("entries"));
+    v.extend([0x91, 0x81]);
+    v.extend(key("preview"));
     v.extend(prefix);
     v
 }
@@ -50,11 +60,11 @@ fn huge_declared_lengths_fail_fast_without_allocating() {
         ("Hello.versions array32", one_field("versions", &ARRAY32_MAX), |b| {
             decode_body::<Hello>(b).is_err()
         }),
-        ("GetReply.data bin32", one_field("data", &BIN32_MAX), |b| {
-            decode_body::<GetReply>(b).is_err()
+        ("ListReply.entries[0].preview bin32", entries_preview(&BIN32_MAX), |b| {
+            decode_body::<ListReply>(b).is_err()
         }),
-        ("GetReply.mime str32", one_field("mime", &STR32_MAX), |b| {
-            decode_body::<GetReply>(b).is_err()
+        ("Restore.mime str32", one_field("mime", &STR32_MAX), |b| {
+            decode_body::<Restore>(b).is_err()
         }),
         ("List.query str32", one_field("query", &STR32_MAX), |b| decode_body::<List>(b).is_err()),
         ("top-level map32", MAP32_MAX.to_vec(), |b| decode_body::<ListReply>(b).is_err()),

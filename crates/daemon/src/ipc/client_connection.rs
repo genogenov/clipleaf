@@ -364,7 +364,6 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
             }
             RequestType::Status => todo!(),
             RequestType::List => todo!(),
-            RequestType::Get => todo!(),
             RequestType::Restore => todo!(),
             RequestType::Pin => todo!(),
             RequestType::Delete => todo!(),
