@@ -5,8 +5,8 @@
 A lightweight, [blazing fast](BENCHMARKS.md), all-in-one clipboard manager for Linux on Wayland.
 
 - **CLI tools** to copy and paste text, images and any other data
-- **Persistent history** that keeps every copy across reboots and keeps the clipboard alive after the source app closes (coming soon)
-- **A clean but rich UI**, as a TUI and a GTK GUI, to filter, search, preview, pin and delete entries, with user themes (coming soon)
+- **Persistent history** that keeps every copy across reboots and keeps the clipboard alive after the source app closes (works today, control interface in progress)
+- **A clean but rich UI**, as a GTK GUI and a TUI, to filter, search, preview, pin and delete entries, with user themes (GUI in progress, TUI planned)
 - **Text, image, file and binary support**
 
 Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
@@ -18,13 +18,35 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 - [x] `clipleaf-paste`: paste the best text type or any specific type, or list what's on offer
 - [x] Zero dependencies for `clipleaf-core`, `clipleaf-copy` and `clipleaf-paste`: no libwayland, no libc crate, only Rust's standard library and hand-written bindings for the few system calls they need
 - [x] At least as fast as wl-clipboard, with bounded memory for large copies ([benchmarks](BENCHMARKS.md))
-- [ ] History daemon: keeps every copy (best text and image format plus file lists by default, more via settings), persists and indexes it, re-owns the clipboard when the source app exits or clears it, and offers an IPC control interface
-- [ ] Search over the full content of every entry
-- [ ] GUI: instant pop-up to search, preview, pin, delete, restore and paste into the focused app, with image thumbnails and CSS theming
+- [ ] History daemon `clipleafd`
+  - [x] Records every copy: the best text and image format plus file lists, without ever blocking the Wayland connection
+  - [x] Persists the history across restarts and crashes: an in-memory index, an append-only log with compaction, and large payloads in their own files
+  - [x] Keeps the last 100 entries and moves a repeated copy to the top instead of storing it twice
+  - [x] Skips password manager copies
+  - [x] Makes JPEG thumbnails of images in the background, so an entry appears before its thumbnail
+  - [x] Keeps the clipboard alive: takes it over when the app you copied from exits or clears it, and at startup if it's empty
+  - [x] Serves pastes from its own files with `splice`, without blocking on slow readers
+  - [x] One instance per session, with a control socket and handshake
+  - [ ] Control interface: list, restore, pin, delete, clear and live updates for the UIs and scripts
+  - [ ] Search over the full content of every entry
+  - [ ] Paste into the focused app, with the right keys in every app (Electron and terminals included)
+  - [ ] Config file and systemd user service
+- [ ] GUI `clipleaf-default-gui`
+  - [x] Pop-up that stays running hidden and appears instantly, drawn once at startup so the first open is as fast as the rest
+  - [x] Toggle command `clipleaf-default-gui-ctl` for a keybinding, which starts the GUI when it isn't running
+  - [x] Closes with Esc or a click outside the pop-up
+  - [x] Daemon connection status, reconnecting on its own
+  - [x] Style overrides in your own `style.css`
+  - [ ] History list with text previews, image thumbnails and file lists
+  - [ ] Restore the picked entry
+  - [ ] Paste into the focused app after picking
+  - [ ] Search
+  - [ ] Live updates while open
+  - [ ] Pin, delete and clear
+  - [ ] Full CSS theming: documented element names, live reload
 - [ ] TUI: the same actions in any terminal
 - [ ] `clipleafctl`: control from scripts and dmenu-style pickers (fuzzel, rofi, wofi)
 - [ ] `clipleaf-copy --file`, automatic MIME type detection, several pastes at once
-- [ ] Older compositors: river, Wayfire, sway before 1.11
 - [ ] Packages for the major distros
 
 Full details are in [TODO.md](TODO.md).
@@ -42,11 +64,11 @@ Not a goal: implementing all of wl-clipboard's functionality or being command-li
 
 A Wayland compositor with `ext_data_control_manager_v1`, such as Hyprland, sway 1.11+ or KDE Plasma.
 
-The default GUI, `clipleaf-default-gui` (planned), also needs GTK ≥ 4.18 and gtk4-layer-shell ≥ 1.0.4. The other tools need neither.
+The GUI, `clipleaf-default-gui` (in progress), also needs GTK ≥ 4.18 and gtk4-layer-shell ≥ 1.0.4, for example Arch or Debian 13 (both checked in CI); Debian 12 and Ubuntu 24.04 are too old for it. The other tools need neither.
 
 ## Install
 
-Build with `cargo build --release`. The binaries end up in `./target/release/`. Distro packages are planned.
+Build with `cargo build --release`: `clipleaf-copy`, `clipleaf-paste` and `clipleafd` end up in `./target/release/`. The GUI needs the GTK headers and is built separately with `cargo build --release -p clipleaf-default-gui`. Distro packages are planned.
 
 ## Usage
 
@@ -77,6 +99,20 @@ Writes the clipboard or the primary selection to stdout.
 | `-h`, `--help` | Show help. |
 
 Without `--type`, `paste` picks the best text type (`text/plain;charset=utf-8` first), then other text such as HTML, then a file list, then an image, and otherwise the first offered type.
+
+### `clipleafd` (history daemon)
+
+Run it once per session, for example from your compositor's autostart (`exec-once = clipleafd` in Hyprland, `exec clipleafd` in sway). It records every copy, keeps the last 100 entries (pinned ones don't count) in `$XDG_STATE_HOME/clipleaf`, and puts the latest entry back on the clipboard when the app you copied from exits or clears it, and at startup if the clipboard is empty. Only one instance runs per session. A config file, a systemd unit and the control commands for the UIs are in progress.
+
+### `clipleaf-default-gui` (in progress)
+
+A pop-up that stays running hidden and appears instantly on a keybinding. Bind the toggle command, which starts the GUI if it isn't running:
+
+```
+bind = SUPER, V, exec, clipleaf-default-gui-ctl toggle   # Hyprland
+```
+
+`clipleaf-default-gui-ctl [show|hide|toggle]` (no argument = toggle). Esc or a click outside the pop-up closes it. Today it shows the daemon connection status (a dot with a tooltip); the history list comes next. Styles can be overridden in `$XDG_CONFIG_HOME/clipleaf-default-gui/style.css` (or `~/.config/clipleaf-default-gui/style.css`).
 
 ### Examples
 
@@ -143,7 +179,11 @@ Linux only. CI builds and tests on x86_64 and aarch64, and type-checks i686, arm
 | `core/` (`clipleaf-core`) | Wayland protocol: socket + fd passing, message reader/writer, object id routing, session setup (registry, seat, data-control device) |
 | `copy/` | `clipleaf-copy` |
 | `paste/` | `clipleaf-paste` |
-| planned | History daemon, TUI, GUI and `clipleafctl` |
+| `daemon/` | `clipleafd`: recording, storage (in-memory index + append-only log + payload files), thumbnails, restore, IPC server |
+| `ipc/` (`clipleaf-ipc`) | The daemon's control protocol: framing, messages, blocking client |
+| `gui/` | `clipleaf-default-gui` (GTK4 + layer-shell) and `clipleaf-default-gui-ctl` |
+| `tests-common/` | Test-only: a Wayland test compositor and helpers for the integration tests |
+| planned | TUI and `clipleafctl` |
 | `bench/` | `bench.sh`: the benchmark in [BENCHMARKS.md](BENCHMARKS.md) |
 
 ## License
