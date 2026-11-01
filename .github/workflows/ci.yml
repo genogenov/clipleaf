@@ -12,6 +12,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The GUI package (crates/gui) needs GTK >= 4.18 and gtk4-layer-shell >= 1.0.4, which ubuntu-24.04
+  # doesn't have: `check` and `cross-check` exclude it, the `gui` job builds it in containers that do.
   check:
     timeout-minutes: 15 # backstop: tests have no timeouts of their own, a hang must not run for hours
     strategy:
@@ -22,9 +24,9 @@ jobs:
       - uses: actions/checkout@v5
       - run: rustup toolchain install stable --profile minimal -c rustfmt,clippy && rustup default stable
       - run: cargo fmt --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy --workspace --release --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --exclude clipleaf-default-gui --all-targets -- -D warnings
+      - run: cargo clippy --workspace --exclude clipleaf-default-gui --release --all-targets -- -D warnings
+      - run: cargo test --workspace --exclude clipleaf-default-gui
       - run: cargo build --release
 
   cross-check:
@@ -44,4 +46,44 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup toolchain install stable --profile minimal -c clippy -t ${{ matrix.target }} && rustup default stable
-      - run: cargo clippy --workspace --target ${{ matrix.target }} --all-targets -- -D warnings
+      - run: cargo clippy --workspace --exclude clipleaf-default-gui --target ${{ matrix.target }} --all-targets -- -D warnings
+
+  gui:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the floor: GTK 4.18.6, gtk4-layer-shell 1.0.4
+          - { os: ubuntu-24.04, image: "debian:trixie" }
+          - { os: ubuntu-24.04-arm, image: "debian:trixie" }
+          # the newest GTK
+          - { os: ubuntu-24.04, image: "archlinux:latest" }
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.image }}
+    steps:
+      - name: System packages (Debian)
+        if: startsWith(matrix.image, 'debian')
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates git libgtk-4-dev libgtk4-layer-shell-dev
+      - name: System packages (Arch)
+        if: startsWith(matrix.image, 'archlinux')
+        run: pacman -Syu --noconfirm --needed base-devel git gtk4 gtk4-layer-shell
+      - uses: actions/checkout@v5
+      # gtk4 0.11 needs rustc >= 1.92; distro toolchains can be older (trixie ships 1.85), so use rustup
+      - name: Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal -c clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - run: cargo clippy -p clipleaf-default-gui --all-targets -- -D warnings
+      - run: cargo clippy -p clipleaf-default-gui --release --all-targets -- -D warnings
+      - run: cargo test -p clipleaf-default-gui
+      - run: cargo build -p clipleaf-default-gui --release
+      # the keybinding target must stay GTK-free (12.9 ms of library loading per press otherwise)
+      - name: clipleaf-default-gui-ctl does not link GTK
+        run: |
+          ldd target/release/clipleaf-default-gui-ctl
+          if ldd target/release/clipleaf-default-gui-ctl | grep -q -e gtk -e glib; then
+            echo "clipleaf-default-gui-ctl links GTK/GLib"; exit 1
+          fi
