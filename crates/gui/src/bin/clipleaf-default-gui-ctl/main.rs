@@ -91,7 +91,7 @@ fn send(cmd: &GuiCommand, timeout: Duration) -> Result<(), GuiControlError> {
     socket.set_read_timeout(Some(timeout))?;
     socket.set_write_timeout(Some(timeout))?;
 
-    if let Err(e) = socket.write_all(cmd.as_sock_line()){
+    if let Err(e) = socket.write_all(cmd.as_sock_line()) {
         return Err(GuiControlError::Io(io::Error::new(
             e.kind(),
             format!("GUI Control: Failed to send command to socket: {e}"),
@@ -117,10 +117,12 @@ fn send(cmd: &GuiCommand, timeout: Duration) -> Result<(), GuiControlError> {
                         "GUI Control: Timeout while waiting for response",
                     )));
                 }
-                _ => return Err(GuiControlError::Io(io::Error::new(
-                    e.kind(),
-                    format!("GUI Control: Failed to read response from socket: {e}"),
-                ))),
+                _ => {
+                    return Err(GuiControlError::Io(io::Error::new(
+                        e.kind(),
+                        format!("GUI Control: Failed to read response from socket: {e}"),
+                    )));
+                }
             },
         }
 
