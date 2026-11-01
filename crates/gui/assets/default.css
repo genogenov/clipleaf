@@ -1,0 +1,12 @@
+window.clipleaf-backdrop {
+    background: transparent;
+}
+
+.clipleaf-main-card {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    border-radius: 12px;
+    padding: 8px;
+    min-width: 380px;
+    min-height: 460px;
+}

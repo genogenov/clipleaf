@@ -20,8 +20,8 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 - [x] At least as fast as wl-clipboard, with bounded memory for large copies ([benchmarks](BENCHMARKS.md))
 - [ ] History daemon: keeps every copy (best text and image format plus file lists by default, more via settings), persists and indexes it, re-owns the clipboard when the source app exits or clears it, and offers an IPC control interface
 - [ ] Search over the full content of every entry
-- [ ] TUI: search, preview, pin, delete, restore, and paste into the focused app
-- [ ] GUI: instant pop-up with the same actions, image thumbnails and CSS theming
+- [ ] GUI: instant pop-up to search, preview, pin, delete, restore and paste into the focused app, with image thumbnails and CSS theming
+- [ ] TUI: the same actions in any terminal
 - [ ] `clipleafctl`: control from scripts and dmenu-style pickers (fuzzel, rofi, wofi)
 - [ ] `clipleaf-copy --file`, automatic MIME type detection, several pastes at once
 - [ ] Older compositors: river, Wayfire, sway before 1.11
@@ -41,6 +41,8 @@ Not a goal: implementing all of wl-clipboard's functionality or being command-li
 ## Requirements
 
 A Wayland compositor with `ext_data_control_manager_v1`, such as Hyprland, sway 1.11+ or KDE Plasma.
+
+The default GUI, `clipleaf-default-gui` (planned), also needs GTK ≥ 4.18 and gtk4-layer-shell ≥ 1.0.4. The other tools need neither.
 
 ## Install
 
