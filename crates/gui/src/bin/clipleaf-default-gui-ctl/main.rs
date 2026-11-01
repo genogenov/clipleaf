@@ -54,9 +54,9 @@ fn run(args: &CtlArgs) -> io::Result<()> {
                 // start...
                 log_debug!("Not running - starting..");
                 spawn_gui()?;
-                return Ok(());
+                Ok(())
             }
-            _ => return Err(io::Error::other(format!("An error occurred :{e}"))),
+            _ => Err(io::Error::other(format!("An error occurred :{e}"))),
         },
     }
 }

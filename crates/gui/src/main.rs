@@ -63,7 +63,7 @@ fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
     let window = RefCell::new(None);
     app.connect_startup(move |app| {
         load_css();
-        let main = MainWindow::new(&app);
+        let main = MainWindow::new(app);
         if start == StartState::Shown {
             main.show();
         }

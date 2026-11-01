@@ -53,7 +53,7 @@ impl Instance {
         Ok(Some(Instance {
             _lock: lock,
             listener: UnixListener::bind(&socket_path)?,
-            socket_path: socket_path,
+            socket_path,
         }))
     }
 }
@@ -64,7 +64,7 @@ fn ackuire_lock(path: &Path) -> io::Result<Option<File>> {
         .write(true)
         .truncate(false)
         .mode(0o600)
-        .open(&path)
+        .open(path)
         .map_err(|e| io::Error::new(e.kind(), format!("GUI Instance: Failed to open lock file {} : {}", path.display(), e)))?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
