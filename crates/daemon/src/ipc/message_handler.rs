@@ -15,7 +15,6 @@ use clipleaf_ipc::protocol::{
 
 pub type EncoderFn = Box<dyn FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError> + Send>;
 
-#[allow(dead_code)]
 pub struct ReplyWaitHandle<T>
 where
     T: Request,

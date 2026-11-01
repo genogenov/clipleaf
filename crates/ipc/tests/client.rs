@@ -3,11 +3,13 @@
 mod common;
 
 use std::{
+    os::fd::AsFd,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
+use clipleaf_core::ffi::poll::{PollEvents, PollFd, PollResult, poll};
 use clipleaf_ipc::{
     client::{Client, Event, error::ClientError},
     protocol::{
@@ -588,5 +590,95 @@ fn oversized_request_is_rejected_locally_and_connection_stays_usable() {
     let res = c.call(&big);
     assert!(matches!(res, Err(ClientError::Protocol(ProtocolError::FrameTooBig))), "{:?}", res.err());
     assert_eq!(c.call(&Status {}).unwrap().entries, 4);
+    d.join();
+}
+
+// ---- Daemon name and AsFd (G1) ----
+
+#[test]
+fn daemon_name_is_the_hello_reply_daemon() {
+    let d = Daemon::spawn(|mut p| {
+        p.handshake(); // replies daemon: Some("fake 0.0.0")
+        p.wait_close();
+    });
+    let c = d.connect();
+    assert_eq!(c.daemon_name(), Some("fake 0.0.0"));
+    drop(c);
+    d.join();
+
+    let d = Daemon::spawn(|mut p| {
+        let (id, _) = p.recv_msg::<Hello>();
+        p.send(
+            id,
+            &clipleaf_ipc::protocol::handshake::HelloReply {
+                version: 1,
+                features: vec![],
+                daemon: None,
+            },
+        );
+        p.wait_close();
+    });
+    let c = d.connect();
+    assert_eq!(c.daemon_name(), None);
+    drop(c);
+    d.join();
+}
+
+/// One non-blocking poll of the client's fd for POLLIN.
+fn fd_readable(c: &Client) -> bool {
+    let mut fds = [PollFd::new(c.as_fd(), PollEvents::IN)];
+    match poll(&mut fds, Some(Duration::ZERO)).expect("poll") {
+        PollResult::Timeout => false,
+        PollResult::Ready(_) => {
+            let revents = fds[0].revents();
+            assert!(revents.has_any(PollEvents::IN), "fd ready without POLLIN");
+            true
+        }
+    }
+}
+
+#[test]
+fn as_fd_is_readable_when_an_event_arrives_and_not_after_draining() {
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let (sent_tx, sent_rx) = mpsc::channel::<()>();
+    let d = Daemon::spawn(move |mut p| {
+        p.handshake();
+        // Only after the client finished the handshake, so the event can't ride in its read.
+        go_rx.recv().unwrap();
+        p.send(0, &Removed { id: 7 });
+        sent_tx.send(()).unwrap();
+        p.wait_close();
+    });
+    let mut c = d.connect();
+    assert!(!fd_readable(&c), "readable before the daemon sent anything");
+    go_tx.send(()).unwrap();
+    sent_rx.recv().unwrap(); // the event is in the socket buffer now (unix delivery is synchronous)
+
+    assert!(fd_readable(&c), "an event in the socket must make the fd readable");
+    assert_eq!(expect_removed(c.next_event(Some(Duration::ZERO)).map(|e| e.expect("event"))), 7);
+    assert!(matches!(c.next_event(Some(Duration::ZERO)), Ok(None)));
+    assert!(!fd_readable(&c), "still readable after the event was read");
+    drop(c);
+    d.join();
+}
+
+/// Pins the AsFd doc: events that `call()` read ahead sit in the client's queue, so the fd is
+/// NOT readable afterwards, yet `next_event(Some(ZERO))` returns them.
+#[test]
+fn event_read_ahead_by_call_is_queued_without_fd_readiness() {
+    let d = Daemon::spawn(|mut p| {
+        p.handshake();
+        let (id, _) = p.recv_msg::<Status>();
+        let mut both = frame(0, &Removed { id: 9 });
+        both.extend(frame(id, &status_reply(3)));
+        p.send_raw(&both); // one write: the client reads both in one go
+        p.wait_close();
+    });
+    let mut c = d.connect();
+    assert_eq!(c.call(&Status {}).unwrap(), status_reply(3));
+    assert!(!fd_readable(&c), "the read-ahead event must not leave bytes in the socket");
+    assert_eq!(expect_removed(c.next_event(Some(Duration::ZERO)).map(|e| e.expect("queued event"))), 9);
+    assert!(matches!(c.next_event(Some(Duration::ZERO)), Ok(None)));
+    drop(c);
     d.join();
 }

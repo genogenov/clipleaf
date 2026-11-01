@@ -9,16 +9,20 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
+use crate::{daemon_client::ClientCommand, pubsub::Pub};
+
 pub struct MainWindow {
     win: gtk4::ApplicationWindow,
     _hold: gio::ApplicationHoldGuard,
     warming: Cell<bool>,
     pending_cmd: Cell<Option<GuiCommand>>,
+    client_sender: Pub<ClientCommand>,
+    status: gtk4::Box,
+    status_tooltip: gtk4::Label,
 }
 
-#[allow(dead_code)]
 impl MainWindow {
-    pub fn new(app: &gtk4::Application) -> Rc<Self> {
+    pub fn new(app: &gtk4::Application, client_sender: Pub<ClientCommand>) -> Rc<Self> {
         let win = gtk4::ApplicationWindow::new(app);
         win.init_layer_shell(); // before anything realizes it
         win.set_layer(Layer::Overlay);
@@ -31,21 +35,27 @@ impl MainWindow {
         win.set_exclusive_zone(-1);
         win.add_css_class("clipleaf-backdrop");
 
-        let status = gtk4::Label::new(Some("connecting…"));
-        status.set_xalign(0.0);
-        status.add_css_class("status");
-        let card = gtk4::Box::new(gtk4::Orientation::Vertical, 4); // the visible popup
+        let (status, status_tooltip) = build_status_elements();
+        let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        header.add_css_class("clipleaf-header");
+        header.append(&status);
+
+        let card = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         card.add_css_class("clipleaf-main-card");
         card.set_halign(gtk4::Align::Center);
         card.set_valign(gtk4::Align::Center);
-        card.append(&status);
         win.set_child(Some(&card));
+
+        card.append(&header);
 
         let main = Rc::new(Self {
             win: win.clone(),
             _hold: app.hold(),
             warming: Cell::new(false),
             pending_cmd: Cell::new(None),
+            client_sender,
+            status,
+            status_tooltip,
         });
 
         let keys = gtk4::EventControllerKey::new();
@@ -77,6 +87,13 @@ impl MainWindow {
 
         main
     }
+
+    pub fn set_status(&self, text: &str, is_connected: bool) {
+        self.status_tooltip.set_label(text);
+        self.status
+            .set_css_classes(&["clipleaf-connection-status", if is_connected { "connected" } else { "disconnected" }]);
+    }
+
     pub fn warmup(self: &Rc<Self>) {
         self.warming.set(true);
         self.win.set_keyboard_mode(KeyboardMode::None);
@@ -105,9 +122,11 @@ impl MainWindow {
     }
     pub fn show(&self) {
         self.win.present();
+        let _ = self.client_sender.try_publish(ClientCommand::SetVisible);
     }
     pub fn hide(&self) {
         self.win.set_visible(false);
+        let _ = self.client_sender.try_publish(ClientCommand::SetHidden);
     }
     pub fn toggle(&self) {
         if self.win.is_visible() { self.hide() } else { self.show() }
@@ -123,4 +142,27 @@ impl MainWindow {
             GuiCommand::Toggle => self.toggle(),
         }
     }
+}
+
+fn build_status_elements() -> (gtk4::Box, gtk4::Label) {
+    let status = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(0)
+        .css_classes(["clipleaf-connection-status", "connecting"])
+        .hexpand(true)
+        .halign(gtk4::Align::End)
+        .valign(gtk4::Align::Center)
+        .has_tooltip(true)
+        .build();
+    let tip = gtk4::Label::builder()
+        .label("Connecting to daemon...")
+        .css_classes(["clipleaf-connection-status-tooltip"])
+        .build();
+    let t = tip.clone();
+    status.connect_query_tooltip(move |_, _x, _y, _keyboard, tooltip| {
+        tooltip.set_custom(Some(&t)); // our widget instead of GTK's default label
+        true // true = show the tooltip
+    });
+
+    (status, tip)
 }

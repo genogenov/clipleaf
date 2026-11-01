@@ -24,6 +24,9 @@
   - MIME type inferred from the input
   - Several pastes at once
 - Fallback to `zwlr_data_control_manager_v1` (river, Wayfire, older sway)
+- GUI placement and multiple monitors
+  - Setting to open the popup centered or at the mouse pointer
+  - A click on any monitor outside the popup closes it
 - Packaging for the major distros
 
 ## Nice to have

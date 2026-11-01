@@ -151,3 +151,61 @@ fn acquire_lock(path: &Path) -> io::Result<Option<File>> {
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::Shutdown;
+
+    use clipleaf_core::ffi::poll::{PollEvents, PollFd, PollResult, poll};
+
+    use super::*;
+    use crate::pubsub::{self, Sub};
+
+    /// Sends `request` (then shuts down our write side if `eof`), runs the handler on the other
+    /// end, and returns (handler result is Ok, bytes the handler wrote back, commands published).
+    fn handle(request: &[u8], eof: bool) -> (bool, Vec<u8>, Vec<GuiCommand>) {
+        let (mut peer, gui_end) = UnixStream::pair().unwrap();
+        peer.write_all(request).unwrap();
+        if eof {
+            peer.shutdown(Shutdown::Write).unwrap();
+        }
+        let (tx, rx): (_, Sub<GuiCommand>) = pubsub::channel(8).unwrap();
+        let ok = Instance::handle_connection(gui_end, tx).is_ok();
+        let mut reply = Vec::new();
+        peer.read_to_end(&mut reply).unwrap(); // the handler dropped its end: EOF
+        (ok, reply, published(&rx))
+    }
+
+    /// Everything published so far. `recv_all` starts with a blocking eventfd read, so only call
+    /// it when poll says the doorbell rang; otherwise nothing was published.
+    fn published(rx: &Sub<GuiCommand>) -> Vec<GuiCommand> {
+        let mut fds = [PollFd::new(rx.fd(), PollEvents::IN)];
+        let mut got = Vec::new();
+        if let PollResult::Ready(_) = poll(&mut fds, Some(Duration::ZERO)).expect("poll") {
+            rx.recv_all(|c| got.push(c));
+        }
+        got
+    }
+
+    #[test]
+    fn valid_command_is_published_and_acknowledged() {
+        assert_eq!(handle(b"show\n", false), (true, b"ok\n".to_vec(), vec![GuiCommand::Show]));
+        assert_eq!(handle(b"toggle\n", true), (true, b"ok\n".to_vec(), vec![GuiCommand::Toggle]));
+    }
+
+    #[test]
+    fn unknown_line_is_rejected_and_not_published() {
+        assert_eq!(handle(b"garbage\n", false), (false, b"rejected\n".to_vec(), vec![]));
+    }
+
+    #[test]
+    fn eof_before_newline_is_rejected_and_not_published() {
+        assert_eq!(handle(b"show", true), (false, b"rejected\n".to_vec(), vec![]));
+    }
+
+    #[test]
+    fn line_of_max_len_without_newline_is_rejected() {
+        let long = [b'a'; GUI_CONTROL_MAX_LINE_LEN];
+        assert_eq!(handle(&long, false), (false, b"rejected\n".to_vec(), vec![]));
+    }
+}

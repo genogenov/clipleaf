@@ -104,6 +104,10 @@ impl Client {
         self.stream.set_write_timeout(duration)
     }
 
+    pub fn daemon_name(&self) -> Option<&str> {
+        self.conn_daemon.as_deref()
+    }
+
     pub fn call<R: Request>(&mut self, req: &R) -> Result<R::Reply, ClientError> {
         if self.poisoned {
             return Err(ClientError::Poisoned);
@@ -253,5 +257,16 @@ impl Client {
                 }
             }
         }
+    }
+}
+
+impl AsFd for Client {
+    /// For 'poll' (POLLIN) only. Never read or write the fd yourself.
+    ///
+    /// 'call()' may read events ahead into the client's queue, which leaves the fd
+    /// not readable. After every 'call()', drain with `next_event(Some(Duration::ZERO))`
+    /// until `Ok(None)` before polling again, or those events wait until the next byte arrives.
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.stream.as_fd()
     }
 }
