@@ -9,11 +9,9 @@ use std::{
 };
 
 use clipleaf_core::{init_logging, log_debug, log_error};
-use clipleaf_default_gui::{EXE_NAME, GuiCommand, GuiControlError, GuiResponse, default_socket_path};
+use clipleaf_default_gui::{EXE_NAME, GUI_CONTROL_MAX_LINE_LEN, GuiCommand, GuiControlError, GuiResponse, default_socket_path};
 
 use crate::args::{ArgCommand, CtlArgs};
-
-const MAX_LINE_LEN: usize = 64;
 
 const EXIT_USAGE_ERROR: u8 = 2;
 
@@ -98,10 +96,10 @@ fn send(cmd: &GuiCommand, timeout: Duration) -> Result<(), GuiControlError> {
         )));
     }
 
-    let mut buf = [0u8; MAX_LINE_LEN];
+    let mut buf = [0u8; GUI_CONTROL_MAX_LINE_LEN];
     let mut pos = 0;
     loop {
-        if pos >= MAX_LINE_LEN {
+        if pos >= GUI_CONTROL_MAX_LINE_LEN {
             return Err(GuiControlError::InvalidData);
         }
 
@@ -111,7 +109,7 @@ fn send(cmd: &GuiCommand, timeout: Duration) -> Result<(), GuiControlError> {
             Err(e) => match e.kind() {
                 ErrorKind::Interrupted => {}
                 ErrorKind::UnexpectedEof => return Err(GuiControlError::InvalidData),
-                ErrorKind::TimedOut => {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
                     return Err(GuiControlError::Io(io::Error::new(
                         e.kind(),
                         "GUI Control: Timeout while waiting for response",

@@ -3,6 +3,8 @@ use std::{env, error, ffi::OsString, fmt::Display, io, path::PathBuf};
 pub const EXE_NAME: &str = "clipleaf-default-gui";
 pub const RELATIVE_SOCKET_PATH: &str = "clipleaf-default-gui/gui.sock";
 
+pub const GUI_CONTROL_MAX_LINE_LEN: usize = 64;
+
 pub fn default_socket_path() -> io::Result<PathBuf> {
     socket_path(env::var_os("XDG_RUNTIME_DIR"))
 }

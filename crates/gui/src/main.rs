@@ -1,5 +1,10 @@
+mod args;
+mod instance;
+mod main_window;
+mod pubsub;
+
 use std::{
-    cell::RefCell,
+    cell::Cell,
     env,
     io::{self, Write},
     process::ExitCode,
@@ -8,6 +13,7 @@ use std::{
 const DEFAULT_GDK_RENDERER: &str = "gl";
 
 use clipleaf_core::{init_logging, log_debug, log_error};
+use clipleaf_default_gui::GuiCommand;
 use gtk4::{
     Application, gdk,
     gio::{
@@ -22,15 +28,10 @@ use crate::{
     main_window::MainWindow,
 };
 
-mod args;
-mod instance;
-mod main_window;
-
 const EXIT_USAGE_ERROR: u8 = 2;
 
 pub fn main() -> ExitCode {
     init_logging();
-
     let args = match args::parse_args(env::args_os()) {
         Ok(ArgCommand::Help(usage)) => {
             let _ = io::stdout().write_all(usage.as_bytes());
@@ -54,21 +55,28 @@ pub fn main() -> ExitCode {
 }
 
 fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
-    let Some(_instance) = Instance::ackuire()? else {
+    let Some((_lock, listener, _socket_path)) = Instance::acquire()? else {
         log_debug!("Another GUI instance already running.");
         return Ok(gtk4::glib::ExitCode::SUCCESS);
     };
     let app = build_app();
     app.connect_activate(|_| {});
-    let window = RefCell::new(None);
+
+    let (sender, sub) = pubsub::channel(8)?;
+    let sub = Cell::new(Some(sub));
     app.connect_startup(move |app| {
         load_css();
         let main = MainWindow::new(app);
+        main.warmup();
         if start == StartState::Shown {
-            main.show();
+            main.apply(GuiCommand::Show);
         }
-        window.replace(Some(main));
+        if let Some(sub) = sub.take() {
+            sub.subscribe(move |cmd| main.as_ref().apply(cmd));
+        }
     });
+    Instance::listen(listener, sender)?;
+
     Ok(app.run_with_args::<&str>(&[]))
 }
 

@@ -1,17 +1,19 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use clipleaf_default_gui::GuiCommand;
 use gtk4::{
-    gdk,
+    gdk::{self, prelude::SurfaceExt},
     gio::{self, prelude::ApplicationExtManual},
-    glib,
-    prelude::{BoxExt, GestureSingleExt, GtkWindowExt, WidgetExt},
+    glib::{self, object::ObjectExt},
+    prelude::{BoxExt, GestureSingleExt, GtkWindowExt, NativeExt, WidgetExt},
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 pub struct MainWindow {
     win: gtk4::ApplicationWindow,
-    _hold: gio::ApplicationHoldGuard, // keeps the app running with no visible window
+    _hold: gio::ApplicationHoldGuard,
+    warming: Cell<bool>,
+    pending_cmd: Cell<Option<GuiCommand>>,
 }
 
 #[allow(dead_code)]
@@ -42,6 +44,8 @@ impl MainWindow {
         let main = Rc::new(Self {
             win: win.clone(),
             _hold: app.hold(),
+            warming: Cell::new(false),
+            pending_cmd: Cell::new(None),
         });
 
         let keys = gtk4::EventControllerKey::new();
@@ -73,6 +77,32 @@ impl MainWindow {
 
         main
     }
+    pub fn warmup(self: &Rc<Self>) {
+        self.warming.set(true);
+        self.win.set_keyboard_mode(KeyboardMode::None);
+        self.win.set_opacity(0.0);
+        self.win.present();
+        let Some(surface) = self.win.surface() else {
+            return self.finish_warmup();
+        };
+        let id = Rc::new(Cell::new(None::<glib::SignalHandlerId>));
+        let (window_clone, id_clone) = (self.clone(), id.clone());
+        id.set(Some(surface.frame_clock().connect_after_paint(move |clock| {
+            if let Some(id) = id_clone.take() {
+                clock.disconnect(id);
+            }
+            window_clone.finish_warmup();
+        })));
+    }
+    fn finish_warmup(&self) {
+        self.warming.set(false);
+        self.win.set_visible(false);
+        self.win.set_opacity(1.0);
+        self.win.set_keyboard_mode(KeyboardMode::Exclusive);
+        if let Some(cmd) = self.pending_cmd.take() {
+            self.apply(cmd);
+        }
+    }
     pub fn show(&self) {
         self.win.present();
     }
@@ -83,6 +113,10 @@ impl MainWindow {
         if self.win.is_visible() { self.hide() } else { self.show() }
     }
     pub fn apply(&self, cmd: GuiCommand) {
+        if self.warming.get() {
+            self.pending_cmd.set(Some(cmd));
+            return;
+        }
         match cmd {
             GuiCommand::Show => self.show(),
             GuiCommand::Hide => self.hide(),
