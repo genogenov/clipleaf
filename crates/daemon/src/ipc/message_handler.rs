@@ -6,11 +6,7 @@ use std::{
 
 use clipleaf_core::ffi::event_fd::EventFd;
 use clipleaf_ipc::protocol::{
-    Request,
-    codec::encode_frame,
-    error::ProtocolError,
-    handshake::{ErrorCode, ErrorReply, Hello, HelloReply},
-    header::MAX_FRAME_LEN,
+    Request, codec::encode_frame, error::ProtocolError, handshake::{ErrorCode, ErrorReply, Hello, HelloReply}, header::MAX_FRAME_LEN, v1::models::{List, ListReply},
 };
 
 pub type EncoderFn = Box<dyn FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError> + Send>;
@@ -83,4 +79,6 @@ where
 
 pub trait RequestMessageHandler: Send + Clone {
     fn handle_hello(&mut self, msg: Hello) -> Result<HelloReply, ErrorReply>;
+
+    fn list(&mut self, msg: List, reply: ReplyWaitHandle<List>) -> io::Result<()>;
 }

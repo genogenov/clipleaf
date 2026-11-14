@@ -10,8 +10,7 @@ use std::{
 use clipleaf_core::{ffi::event_fd::EventFd, log_debug, log_warn};
 
 use crate::{
-    ipc::{handler_v1::HandlerV1, listener::IpcListener},
-    storage::lock_file,
+    index::SnapshotHandle, ipc::{handler_v1::HandlerV1, listener::IpcListener}, storage::lock_file,
 };
 
 pub struct IpcServer {
@@ -51,7 +50,7 @@ impl IpcServer {
         })
     }
 
-    pub fn start(&mut self) -> io::Result<()> {
+    pub fn start(&mut self, snapshot: SnapshotHandle) -> io::Result<()> {
         log_debug!("IPC Server: Deleting previous sock file at {}", self.socket_path.display());
 
         match fs::remove_file(&self.socket_path) {
@@ -63,7 +62,7 @@ impl IpcServer {
 
         let listener = UnixListener::bind(&self.socket_path)?;
         listener.set_nonblocking(true)?;
-        let mut listener = IpcListener::new(self.shutdown.clone(), listener, HandlerV1 {});
+        let mut listener = IpcListener::new(self.shutdown.clone(), listener, HandlerV1::new(snapshot));
         let handle = thread::Builder::new().name("IPC-listener".to_owned()).spawn(move || {
             listener.run();
         })?;

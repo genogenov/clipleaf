@@ -24,6 +24,7 @@ use clipleaf_ipc::{
         error::ProtocolError,
         handshake::{ErrorCode, ErrorReply, Hello},
         header::{Header, MAX_FRAME_LEN, MAX_REQUEST_LEN, MessageType, RequestType},
+        v1::models::List,
     },
 };
 
@@ -48,7 +49,6 @@ struct ReplySink {
     pending: usize,
 }
 impl ReplySink {
-    #[allow(dead_code)]
     fn handle<R: Request>(&mut self, req_id: u32) -> ReplyWaitHandle<R>
     where
         R::Reply: Send,
@@ -322,7 +322,7 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
         out_buf: &mut Vec<u8>,
         handler: &mut T,
         req: (&Header, &[u8], RequestType),
-        _sink: &mut ReplySink,
+        sink: &mut ReplySink,
     ) -> Result<(), ProtocolError> {
         if *state == State::AwaitHandshake && req.2 != RequestType::Hello {
             Self::write_error(out_buf, 0, ErrorCode::BadRequest, "The handshake message must be Hello.".to_string())?;
@@ -363,7 +363,30 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
                 Ok(())
             }
             RequestType::Status => todo!(),
-            RequestType::List => todo!(),
+            RequestType::List => {
+                if *state != State::Ready {
+                    Self::write_error(
+                        out_buf,
+                        req.0.req_id,
+                        ErrorCode::BadRequest,
+                        "List command can only be sent after handshake.".to_string(),
+                    )?;
+                    return Ok(());
+                }
+                let Ok(msg) = decode_body::<List>(req.1) else {
+                    Self::write_error(
+                        out_buf,
+                        req.0.req_id,
+                        ErrorCode::BadRequest,
+                        "Invalid or malformed List command.".to_string(),
+                    )?;
+                    return Ok(());
+                };
+
+                handler.list(msg, sink.handle(req.0.req_id));
+
+                Ok(())
+            }
             RequestType::Restore => todo!(),
             RequestType::Pin => todo!(),
             RequestType::Delete => todo!(),

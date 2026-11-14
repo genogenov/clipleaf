@@ -19,6 +19,12 @@ pub struct PayloadFile {
     pub(super) seqnum: usize,
 }
 
+impl PayloadFile {
+    pub fn head<'a>(&'a self) -> Option<&'a [u8]>{
+        self.head.as_deref()
+    }
+}
+
 pub struct PayloadWriter {
     pub(super) file_path_base: Arc<Path>,
     pub(super) mime: Option<Mime<Cow<'static, str>>>,

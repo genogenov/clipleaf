@@ -30,6 +30,7 @@ pub enum Kind {
     Markdown,
     Image,
     File,
+    Password,
     #[serde(other)]
     Other,
 }

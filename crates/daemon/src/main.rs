@@ -96,7 +96,7 @@ impl Daemon {
         let jobs = JobList::new()?;
         let payloads_dir = store.payloads_dir();
 
-        match server.start() {
+        match server.start(snapshot.clone()) {
             Ok(s) => s,
             Err(err) => {
                 return Err(io::Error::new(err.kind(), format!("Failed to start IPC server: {}", err)));
