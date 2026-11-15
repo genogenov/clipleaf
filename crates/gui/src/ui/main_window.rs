@@ -3,11 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use clipleaf_default_gui::GuiCommand;
 use clipleaf_ipc::protocol::v1::models::ListReply;
 use gtk4::{
-    ListView, ScrolledWindow, SignalListItemFactory, SingleSelection,
-    gdk::{self, prelude::SurfaceExt},
-    gio::{self, prelude::ApplicationExtManual},
-    glib::{self, object::ObjectExt},
-    prelude::{BoxExt, GestureSingleExt, GtkWindowExt, NativeExt, WidgetExt},
+    gdk::{self, prelude::SurfaceExt}, gio::{self, prelude::ApplicationExtManual}, glib::{self, object::ObjectExt}, prelude::{BoxExt, GestureSingleExt, GtkWindowExt, NativeExt, WidgetExt},
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 

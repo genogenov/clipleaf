@@ -1,11 +1,10 @@
 use std::cell::Ref;
 
-use clipleaf_core::log_debug;
 use clipleaf_ipc::protocol::v1::models::{EntrySummary, Kind, ThumbState};
 use gtk4::{
     gdk::{Paintable, Texture},
     glib,
-    prelude::{BoxExt, GridExt, WidgetExt},
+    prelude::{GridExt, WidgetExt},
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -167,16 +166,15 @@ impl RowWidgets {
     fn display_text(&self, bytes: &[u8]) -> String {
         let text = match str::from_utf8(bytes) {
             Ok(txt) => txt,
-            Err(e) if e.error_len() == None => str::from_utf8(&bytes[..e.valid_up_to()]).unwrap_or_default(),
+            Err(e) if e.error_len().is_none() => str::from_utf8(&bytes[..e.valid_up_to()]).unwrap_or_default(),
             Err(_) => &String::from_utf8_lossy(bytes),
         };
 
         let trimmed = text.trim_start_matches(['\n', '\r']);
         let mut result = String::new();
-        let mut iter = trimmed.graphemes(true).take(MAX_TEXT_CHARS);
 
         let mut lines = 1;
-        while let Some(c) = iter.next() {
+        for c in trimmed.graphemes(true).take(MAX_TEXT_CHARS) {
             let is_break = match c {
                 "\r\n" | "\r" | "\n" | "\u{2029}" => true,
                 _ => {
@@ -214,5 +212,5 @@ fn get_unit_size(size: u64) -> (&'static str, u64) {
         return ("GB", size);
     }
     let size = size / 1024;
-    return ("TB", size);
+    ("TB", size)
 }

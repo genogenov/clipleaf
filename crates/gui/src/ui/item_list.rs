@@ -6,9 +6,9 @@ use crate::ui::row_widgets::RowWidgets;
 pub struct ItemList {
     item_list: gio::ListStore,
     pub list_window: ScrolledWindow,
-    list_view: ListView,
-    selection: SingleSelection,
-    factory: SignalListItemFactory
+    _list_view: ListView,
+    _selection: SingleSelection,
+    _factory: SignalListItemFactory
 }
 
 impl ItemList {
@@ -49,9 +49,9 @@ impl ItemList {
         Self {
             item_list,
             list_window,
-            list_view,
-            selection,
-            factory
+            _list_view: list_view,
+            _selection: selection,
+            _factory: factory
         }
     }
 
