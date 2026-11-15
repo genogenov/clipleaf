@@ -1,7 +1,7 @@
 mod args;
 mod daemon_client;
 mod instance;
-mod main_window;
+mod ui;
 mod pubsub;
 mod state;
 mod style;
@@ -31,7 +31,7 @@ use crate::{
     args::{ArgCommand, StartState},
     daemon_client::spawn_client_worker,
     instance::Instance,
-    main_window::MainWindow,
+    ui::main_window::MainWindow,
     state::{AppState, ConnState},
 };
 

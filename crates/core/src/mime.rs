@@ -218,7 +218,13 @@ pub fn pick_fetch_mimes<S: AsRef<str> + Clone>(mimes: &[S], cap_known: usize) ->
     }
     let modifier = file_modifier.filter(|_| !files.is_empty());
     let cap = cap_known.saturating_sub(usize::from(modifier.is_some()));
-    let mut result: Vec<Mime<S>> = text.into_iter().chain(image).chain(files).take(cap).map(|m| m.as_cloned_mime()).collect();
+    let mut result: Vec<Mime<S>> = files
+        .into_iter() // 1. file lists (in the order the source offered them)
+        .chain(image) // 2. the best image type
+        .chain(text) // 3. the best text type
+        .take(cap)
+        .map(|m| m.as_cloned_mime())
+        .collect();
     if let Some(modifier) = modifier
         && result.iter().any(|m| m.kind == MimeKind::FileList)
     {

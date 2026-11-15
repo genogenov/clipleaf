@@ -3,6 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use clipleaf_default_gui::GuiCommand;
 use clipleaf_ipc::protocol::v1::models::ListReply;
 use gtk4::{
+    ListView, ScrolledWindow, SignalListItemFactory, SingleSelection,
     gdk::{self, prelude::SurfaceExt},
     gio::{self, prelude::ApplicationExtManual},
     glib::{self, object::ObjectExt},
@@ -10,7 +11,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::{daemon_client::ClientCommand, pubsub::Pub};
+use crate::{daemon_client::ClientCommand, pubsub::Pub, ui::item_list::ItemList};
 
 pub struct MainWindow {
     win: gtk4::ApplicationWindow,
@@ -20,7 +21,7 @@ pub struct MainWindow {
     client_sender: Pub<ClientCommand>,
     status: gtk4::Box,
     status_tooltip: gtk4::Label,
-    _temp_list_label: gtk4::Label
+    item_list:ItemList
 }
 
 impl MainWindow {
@@ -49,9 +50,8 @@ impl MainWindow {
         win.set_child(Some(&card));
 
         card.append(&header);
-
-        let temp = gtk4::Label::new(None);
-        card.append(&temp);
+        let item_list = ItemList::new();
+        card.append(&item_list.list_window);
 
         let main = Rc::new(Self {
             win: win.clone(),
@@ -61,7 +61,7 @@ impl MainWindow {
             client_sender,
             status,
             status_tooltip,
-            _temp_list_label: temp
+            item_list
         });
 
         let keys = gtk4::EventControllerKey::new();
@@ -100,12 +100,12 @@ impl MainWindow {
             .set_css_classes(&["clipleaf-connection-status", if is_connected { "connected" } else { "disconnected" }]);
     }
 
-    pub fn set_list(&self, list: ListReply){
-        self._temp_list_label.set_label(format!("Got list of {} items", list.total).as_str());
+    pub fn set_list(&self, list: ListReply) {
+        self.item_list.set_list(list.entries);
     }
 
-    pub fn clear_list(&self){
-        self._temp_list_label.set_label("");
+    pub fn clear_list(&self) {
+        self.item_list.clear_list();
     }
 
     pub fn warmup(self: &Rc<Self>) {

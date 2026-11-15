@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{daemon_client::ClientEvent, main_window::MainWindow};
+use crate::{daemon_client::ClientEvent, ui::main_window::MainWindow};
 
 #[derive(PartialEq, Eq)]
 pub enum ConnState {

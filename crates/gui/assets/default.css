@@ -47,3 +47,8 @@ tooltip {
     border-radius: 6px;
     padding: 4px 8px;
 }
+
+.clipleaf-item-list-window { min-height: 400px; }
+.clipleaf-list-row { padding: 6px 10px; }
+.clipleaf-list-item-meta { opacity: 0.6; font-size: smaller; }
+.clipleaf-list-item-thumb.pending, .clipleaf-list-item-thumb.unavailable { background: alpha(currentColor, 0.08); }
