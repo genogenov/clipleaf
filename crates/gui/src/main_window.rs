@@ -1,6 +1,7 @@
 use std::{cell::Cell, rc::Rc};
 
 use clipleaf_default_gui::GuiCommand;
+use clipleaf_ipc::protocol::v1::models::ListReply;
 use gtk4::{
     gdk::{self, prelude::SurfaceExt},
     gio::{self, prelude::ApplicationExtManual},
@@ -19,6 +20,7 @@ pub struct MainWindow {
     client_sender: Pub<ClientCommand>,
     status: gtk4::Box,
     status_tooltip: gtk4::Label,
+    _temp_list_label: gtk4::Label
 }
 
 impl MainWindow {
@@ -48,6 +50,9 @@ impl MainWindow {
 
         card.append(&header);
 
+        let temp = gtk4::Label::new(None);
+        card.append(&temp);
+
         let main = Rc::new(Self {
             win: win.clone(),
             _hold: app.hold(),
@@ -56,6 +61,7 @@ impl MainWindow {
             client_sender,
             status,
             status_tooltip,
+            _temp_list_label: temp
         });
 
         let keys = gtk4::EventControllerKey::new();
@@ -92,6 +98,14 @@ impl MainWindow {
         self.status_tooltip.set_label(text);
         self.status
             .set_css_classes(&["clipleaf-connection-status", if is_connected { "connected" } else { "disconnected" }]);
+    }
+
+    pub fn set_list(&self, list: ListReply){
+        self._temp_list_label.set_label(format!("Got list of {} items", list.total).as_str());
+    }
+
+    pub fn clear_list(&self){
+        self._temp_list_label.set_label("");
     }
 
     pub fn warmup(self: &Rc<Self>) {

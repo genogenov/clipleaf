@@ -6,7 +6,7 @@ use std::{
 
 use clipleaf_core::ffi::event_fd::EventFd;
 use clipleaf_ipc::protocol::{
-    Request, codec::encode_frame, error::ProtocolError, handshake::{ErrorCode, ErrorReply, Hello, HelloReply}, header::MAX_FRAME_LEN, v1::models::{List, ListReply},
+    Request, codec::encode_frame, error::ProtocolError, handshake::{ErrorCode, ErrorReply, Hello, HelloReply}, header::MAX_FRAME_LEN, v1::models::List,
 };
 
 pub type EncoderFn = Box<dyn FnOnce(&mut Vec<u8>) -> Result<(), ProtocolError> + Send>;

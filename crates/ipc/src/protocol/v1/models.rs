@@ -90,7 +90,8 @@ pub struct EntrySummary {
     pub pinned: bool,
     /// Total size of all stored types in bytes.
     pub size: u64,
-    /// At most 1000 characters cut from the head (UTF-8 for text kinds; may end mid-line).
+    /// The stored content: all of it for small payloads, or the first 5 KiB of a large payload.
+    /// Bytes as stored (UTF-8 for text kinds) and may end mid-character; clients cut for display.
     #[serde(with = "serde_bytes")]
     pub preview: Vec<u8>,
     #[serde(deserialize_with = "bounded_vec::bounded_vec::<_,_,256>")]

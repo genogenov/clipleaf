@@ -1,6 +1,6 @@
-use std::{io, sync::Arc};
+use std::io;
 
-use clipleaf_core::{ContentKind, ContentKinds};
+use clipleaf_core::ContentKind;
 use clipleaf_ipc::protocol::{
     handshake::{ErrorCode, ErrorReply, Hello, HelloReply},
     v1::models::{EntrySummary, Kind, List, ListReply, Thumb, TypeSummary},
@@ -9,7 +9,7 @@ use clipleaf_ipc::protocol::{
 use crate::{
     index::{Item, SnapshotHandle},
     ipc::message_handler::{ReplyWaitHandle, RequestMessageHandler},
-    storage::{Data, Entry, TypeMeta},
+    storage::{Data, TypeMeta},
 };
 
 const SUPPORTED_VERSION: u32 = 1;
@@ -54,7 +54,7 @@ impl RequestMessageHandler for HandlerV1 {
             .iter()
             .skip(msg.offset as usize)
             .take(msg.limit.unwrap_or(100).min(100) as usize)
-            .map(build_summary);
+            .map(|item| build_summary(item, msg.thumbs));
 
         reply.set_reply(Ok(ListReply {
             entries: entries.collect(),
@@ -63,7 +63,7 @@ impl RequestMessageHandler for HandlerV1 {
     }
 }
 
-fn build_summary(item: &Item) -> EntrySummary {
+fn build_summary(item: &Item, include_thumb: bool) -> EntrySummary {
     let mut size = 0;
     let mut kind = None;
     let mut files_count = None;
@@ -72,10 +72,13 @@ fn build_summary(item: &Item) -> EntrySummary {
     let mut types = Vec::with_capacity(item.entry.types.len());
     for t in &item.entry.types {
         size += t.size;
-        files_count = match t.meta {
-            Some(TypeMeta::FileList { items }) => Some(items),
-            _ => None,
-        };
+
+        if files_count.is_none() {
+            files_count = match t.meta {
+                Some(TypeMeta::FileList { items }) => Some(items),
+                _ => None,
+            };
+        }
 
         let content_kind = ContentKind::from_mime(&t.mime);
         if kind.is_none() {
@@ -94,8 +97,8 @@ fn build_summary(item: &Item) -> EntrySummary {
         if preview.is_none() {
             preview = match content_kind {
                 Some(ContentKind::Text | ContentKind::File | ContentKind::Html | ContentKind::Markdown | ContentKind::Password) => match &t.data {
-                    Data::Inline(buff) => Some(String::from_utf8_lossy(&buff).as_bytes().to_vec()),
-                    Data::File(payload_file) => payload_file.head().map(|head| String::from_utf8_lossy(head).as_bytes().to_vec()),
+                    Data::Inline(buff) => Some(buff.to_vec()),
+                    Data::File(payload_file) => payload_file.head().map(|head| head.to_vec()),
                 },
                 _ => None,
             }
@@ -106,7 +109,7 @@ fn build_summary(item: &Item) -> EntrySummary {
         {
             thumb = match &t.meta {
                 Some(TypeMeta::ThumbNail(Some(thumb))) => Some(Thumb {
-                    data: Some(thumb.jpeg.to_vec()),
+                    data: include_thumb.then(|| thumb.jpeg.to_vec()),
                     state: clipleaf_ipc::protocol::v1::models::ThumbState::Ready,
                     format: Some("image/jpeg".to_string()),
                     width: Some(thumb.width as u32),
@@ -118,6 +121,17 @@ fn build_summary(item: &Item) -> EntrySummary {
                 }),
                 Some(TypeMeta::ThumbNail(None)) => Some(Thumb {
                     state: clipleaf_ipc::protocol::v1::models::ThumbState::Unavailable,
+                    format: None,
+                    width: None,
+                    height: None,
+                    src_width: None,
+                    src_height: None,
+                    orientation: None,
+                    has_alpha: None,
+                    data: None,
+                }),
+                None => Some(Thumb {
+                    state: clipleaf_ipc::protocol::v1::models::ThumbState::Pending,
                     format: None,
                     width: None,
                     height: None,
@@ -145,9 +159,9 @@ fn build_summary(item: &Item) -> EntrySummary {
         pinned: item.pinned,
         preview: preview.unwrap_or_default(),
         score: None,
-        size: size,
-        thumb: thumb,
+        size,
+        thumb,
         time_ms: item.time_ms,
-        types: types,
+        types,
     }
 }

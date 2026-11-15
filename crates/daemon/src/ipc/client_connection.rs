@@ -383,7 +383,7 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
                     return Ok(());
                 };
 
-                handler.list(msg, sink.handle(req.0.req_id));
+                handler.list(msg, sink.handle(req.0.req_id))?;
 
                 Ok(())
             }

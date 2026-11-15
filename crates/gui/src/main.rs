@@ -69,9 +69,9 @@ fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
     let app = build_app();
     app.connect_activate(|_| {});
 
-    let (sender, sub) = pubsub::channel(8)?;
-    let sub = Cell::new(Some(sub));
-    let (client_sender, client_sub) = pubsub::channel(8)?;
+    let (gui_cmd_sender, gui_cmd_sub) = pubsub::channel(32)?;
+    let sub = Cell::new(Some(gui_cmd_sub));
+    let (client_sender, client_sub) = pubsub::channel(32)?;
     let (daemon_client, ev_sub) = daemon_client::DaemonClient::new(client_sub)?;
     let ev_sub = Cell::new(Some(ev_sub));
     app.connect_startup(move |app| {
@@ -93,7 +93,7 @@ fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
         let main = MainWindow::new(app, client_sender.clone());
         let mut state = AppState {
             con_id: 0,
-            conn: ConnState::Connecting,
+            conn: ConnState::Connecting
         };
         main.warmup();
         if start == StartState::Shown {
@@ -105,13 +105,11 @@ fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
         }
         if let Some(ev_sub) = ev_sub.take() {
             ev_sub.subscribe(move |ev| {
-                if state.apply(ev) {
-                    main.set_status(&state.status_text(), state.is_connected());
-                }
+                state.apply(ev, &main);
             });
         }
     });
-    Instance::listen(listener, sender)?;
+    Instance::listen(listener, gui_cmd_sender)?;
     spawn_client_worker(daemon_client)?;
 
     Ok(app.run_with_args::<&str>(&[]))
