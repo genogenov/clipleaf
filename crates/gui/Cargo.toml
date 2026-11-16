@@ -11,6 +11,7 @@ gtk4 = { version = "0.11.5", features = ["v4_18"] }
 gtk4-layer-shell = { version = "0.8.1" }
 glib-unix = { version = "0.22.8" }
 unicode-segmentation ={ version = "1.13.3"}
+percent-encoding = {version = "2.3.2"}
 
 [dev-dependencies]
 clipleaf-test-common = { path = "../tests-common" }

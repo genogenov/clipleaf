@@ -43,6 +43,7 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
   - [ ] Search
   - [ ] Live updates while open
   - [ ] Pin, delete and clear
+  - [ ] Switch between an entry's types (text, image, files) and restore only the one shown
   - [ ] Full CSS theming: documented element names, live reload
 - [ ] TUI: the same actions in any terminal
 - [ ] `clipleafctl`: control from scripts and dmenu-style pickers (fuzzel, rofi, wofi)

@@ -1,9 +1,11 @@
 use std::io;
 
-use clipleaf_core::ContentKind;
+use clipleaf_core::{
+    ContentKind, mime_types::{GNOME_COPIED_FILES, KDE_CUT_MARKER},
+};
 use clipleaf_ipc::protocol::{
     handshake::{ErrorCode, ErrorReply, Hello, HelloReply},
-    v1::models::{EntrySummary, Kind, List, ListReply, Thumb, TypeSummary},
+    v1::models::{EntrySummary, FileOp, Kind, List, ListReply, Thumb, TypeSummary},
 };
 
 use crate::{
@@ -64,104 +66,99 @@ impl RequestMessageHandler for HandlerV1 {
 }
 
 fn build_summary(item: &Item, include_thumb: bool) -> EntrySummary {
-    let mut size = 0;
-    let mut kind = None;
-    let mut files_count = None;
-    let mut preview = None;
-    let mut thumb = None;
     let mut types = Vec::with_capacity(item.entry.types.len());
+    let mut file_op = None;
     for t in &item.entry.types {
-        size += t.size;
-
-        if files_count.is_none() {
-            files_count = match t.meta {
-                Some(TypeMeta::FileList { items }) => Some(items),
-                _ => None,
-            };
-        }
+        let files_count = match t.meta {
+            Some(TypeMeta::FileList { items }) => {
+                file_op.get_or_insert(FileOp::Copy);
+                Some(items)
+            }
+            _ => None,
+        };
 
         let content_kind = ContentKind::from_mime(&t.mime);
-        if kind.is_none() {
-            kind = match content_kind {
-                Some(ContentKind::File) => Some(Kind::File),
-                Some(ContentKind::Html) => Some(Kind::Html),
-                Some(ContentKind::Image) => Some(Kind::Image),
-                Some(ContentKind::Markdown) => Some(Kind::Markdown),
-                Some(ContentKind::Password) => Some(Kind::Password),
-                Some(ContentKind::Text) => Some(Kind::Text),
-                Some(ContentKind::Other) => Some(Kind::Other),
-                _ => None,
-            }
+        let preview = match content_kind {
+            Some(ContentKind::Text | ContentKind::File | ContentKind::Html | ContentKind::Markdown | ContentKind::Password) => match &t.data {
+                Data::Inline(buff) => buff.to_vec(),
+                Data::File(payload_file) => payload_file.head().map_or_default(|head| head.to_vec()),
+            },
+            _ => Vec::default(),
+        };
+
+        if t.mime.mime() == KDE_CUT_MARKER {
+            file_op = Some(match &t.data {
+                Data::Inline(b) if b.as_ref() == b"1" => FileOp::Cut,
+                _ => FileOp::Copy,
+            });
+        } else if t.mime.mime() == GNOME_COPIED_FILES && preview.split(|&b| b == b'\n').next() == Some(b"cut") {
+            file_op = Some(FileOp::Cut);
         }
 
-        if preview.is_none() {
-            preview = match content_kind {
-                Some(ContentKind::Text | ContentKind::File | ContentKind::Html | ContentKind::Markdown | ContentKind::Password) => match &t.data {
-                    Data::Inline(buff) => Some(buff.to_vec()),
-                    Data::File(payload_file) => payload_file.head().map(|head| head.to_vec()),
-                },
-                _ => None,
-            }
-        }
+        let kind = match content_kind {
+            Some(ContentKind::File) => Kind::File,
+            Some(ContentKind::Html) => Kind::Html,
+            Some(ContentKind::Image) => Kind::Image,
+            Some(ContentKind::Markdown) => Kind::Markdown,
+            Some(ContentKind::Password) => Kind::Password,
+            Some(ContentKind::Text) => Kind::Text,
+            Some(ContentKind::Other) => Kind::Other,
+            _ => continue,
+        };
 
-        if thumb.is_none()
-            && let Some(ContentKind::Image) = content_kind
-        {
-            thumb = match &t.meta {
-                Some(TypeMeta::ThumbNail(Some(thumb))) => Some(Thumb {
-                    data: include_thumb.then(|| thumb.jpeg.to_vec()),
-                    state: clipleaf_ipc::protocol::v1::models::ThumbState::Ready,
-                    format: Some("image/jpeg".to_string()),
-                    width: Some(thumb.width as u32),
-                    height: Some(thumb.height as u32),
-                    src_width: Some(thumb.src_width),
-                    src_height: Some(thumb.src_height),
-                    orientation: Some(thumb.orientation),
-                    has_alpha: Some(thumb.has_alpha),
-                }),
-                Some(TypeMeta::ThumbNail(None)) => Some(Thumb {
-                    state: clipleaf_ipc::protocol::v1::models::ThumbState::Unavailable,
-                    format: None,
-                    width: None,
-                    height: None,
-                    src_width: None,
-                    src_height: None,
-                    orientation: None,
-                    has_alpha: None,
-                    data: None,
-                }),
-                None => Some(Thumb {
-                    state: clipleaf_ipc::protocol::v1::models::ThumbState::Pending,
-                    format: None,
-                    width: None,
-                    height: None,
-                    src_width: None,
-                    src_height: None,
-                    orientation: None,
-                    has_alpha: None,
-                    data: None,
-                }),
-                _ => None,
-            }
-        }
+        let thumb = match (content_kind, &t.meta) {
+            (Some(ContentKind::Image), Some(TypeMeta::ThumbNail(Some(thumb)))) => Some(Thumb {
+                data: include_thumb.then(|| thumb.jpeg.to_vec()),
+                state: clipleaf_ipc::protocol::v1::models::ThumbState::Ready,
+                format: Some("image/jpeg".to_string()),
+                width: Some(thumb.width as u32),
+                height: Some(thumb.height as u32),
+                src_width: Some(thumb.src_width),
+                src_height: Some(thumb.src_height),
+                orientation: Some(thumb.orientation),
+                has_alpha: Some(thumb.has_alpha),
+            }),
+            (Some(ContentKind::Image), Some(TypeMeta::ThumbNail(None))) => Some(Thumb {
+                state: clipleaf_ipc::protocol::v1::models::ThumbState::Unavailable,
+                format: None,
+                width: None,
+                height: None,
+                src_width: None,
+                src_height: None,
+                orientation: None,
+                has_alpha: None,
+                data: None,
+            }),
+            (Some(ContentKind::Image), None) => Some(Thumb {
+                state: clipleaf_ipc::protocol::v1::models::ThumbState::Pending,
+                format: None,
+                width: None,
+                height: None,
+                src_width: None,
+                src_height: None,
+                orientation: None,
+                has_alpha: None,
+                data: None,
+            }),
+            _ => None,
+        };
 
         types.push(TypeSummary {
             mime: t.mime.mime().to_string(),
             size: t.size,
+            file_count: files_count,
+            kind,
+            preview,
+            thumb,
         });
     }
 
     EntrySummary {
-        file_count: files_count,
-        file_op: None,
         id: item.entry.id,
-        kind: kind.unwrap_or(Kind::Other),
         pinned: item.pinned,
-        preview: preview.unwrap_or_default(),
         score: None,
-        size,
-        thumb,
         time_ms: item.time_ms,
         types,
+        file_op,
     }
 }

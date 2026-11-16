@@ -20,6 +20,7 @@
   - Pin, delete and clear
   - Theming pass: documented element names and state classes, live reload of `style.css`
   - Large preview of the original image
+  - Switch between an entry's types (for example the text and the image of a browser copy, or the paths and the file list) and restore only the one shown
   - `clipleaf-default-gui-ctl quit`
 - TUI
   - Runs in any terminal, started from a keybinding; the user's window rules decide whether it floats

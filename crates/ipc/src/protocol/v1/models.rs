@@ -85,30 +85,39 @@ pub enum Formats {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EntrySummary {
     pub id: u64,
-    pub kind: Kind,
     pub time_ms: u64,
     pub pinned: bool,
-    /// Total size of all stored types in bytes.
-    pub size: u64,
-    /// The stored content: all of it for small payloads, or the first 5 KiB of a large payload.
-    /// Bytes as stored (UTF-8 for text kinds) and may end mid-character; clients cut for display.
-    #[serde(with = "serde_bytes")]
-    pub preview: Vec<u8>,
+    /// The entry's content types in the daemon's priority order: file lists, then the image, then
+    /// the text. Clients show `types[0]` by default and are free to pick another. Non-content
+    /// types (e.g. the KDE cut marker) are stored and restored with the entry but not listed;
+    /// what they say is carried by the entry (`file_op`).
     #[serde(deserialize_with = "bounded_vec::bounded_vec::<_,_,256>")]
     pub types: Vec<TypeSummary>,
-    pub thumb: Option<Thumb>,
-    /// Number of files, for file-list entries.
-    pub file_count: Option<u32>,
-    /// Copy or cut, for file-list entries.
-    pub file_op: Option<FileOp>,
     /// Search relevance; set only on search results.
     pub score: Option<f32>,
+    /// Copy or cut; set when `types` holds a file list.
+    pub file_op: Option<FileOp>,
 }
 
+/// One stored type of an entry: what a client needs to show it, and its `mime` to restore it
+/// alone (`Restore { formats: Mime, .. }`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct TypeSummary {
     pub mime: String,
+    /// Size of the stored bytes.
     pub size: u64,
+    pub kind: Kind,
+    /// Image kinds only.
+    pub thumb: Option<Thumb>,
+    /// Number of files, file kinds only.
+    pub file_count: Option<u32>,
+    /// The stored content: all of it for small payloads, or the first 5 KiB of a large payload.
+    /// Bytes as stored (UTF-8 for text kinds) and may end mid-character; clients cut for display.
+    /// File kinds: the list as the source wrote it (e.g. a leading `copy`/`cut` line for
+    /// `x-special/gnome-copied-files`, CRLF-separated URIs for `text/uri-list`).
+    /// Empty for image and other kinds.
+    #[serde(with = "serde_bytes")]
+    pub preview: Vec<u8>,
 }
 
 /// Thumbnail state and metadata; the JPEG bytes only when the client asked for them

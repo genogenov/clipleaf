@@ -3,7 +3,10 @@ use std::{cell::Cell, rc::Rc};
 use clipleaf_default_gui::GuiCommand;
 use clipleaf_ipc::protocol::v1::models::ListReply;
 use gtk4::{
-    gdk::{self, prelude::SurfaceExt}, gio::{self, prelude::ApplicationExtManual}, glib::{self, object::ObjectExt}, prelude::{BoxExt, GestureSingleExt, GtkWindowExt, NativeExt, WidgetExt},
+    gdk::{self, prelude::SurfaceExt},
+    gio::{self, prelude::ApplicationExtManual},
+    glib::{self, object::ObjectExt},
+    prelude::{BoxExt, GestureSingleExt, GtkWindowExt, NativeExt, WidgetExt},
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
@@ -17,7 +20,8 @@ pub struct MainWindow {
     client_sender: Pub<ClientCommand>,
     status: gtk4::Box,
     status_tooltip: gtk4::Label,
-    item_list:ItemList
+    item_list: ItemList,
+    offline_label: gtk4::Label,
 }
 
 impl MainWindow {
@@ -46,8 +50,16 @@ impl MainWindow {
         win.set_child(Some(&card));
 
         card.append(&header);
+
         let item_list = ItemList::new();
-        card.append(&item_list.list_window);
+        let offline_label = gtk4::Label::builder()
+            .label("Connecting to daemon...")
+            .css_classes(["clipleaf-offline"])
+            .vexpand(true)
+            .build();
+        card.append(&item_list.root);
+        card.append(&offline_label);
+        item_list.root.set_visible(false);
 
         let main = Rc::new(Self {
             win: win.clone(),
@@ -57,7 +69,8 @@ impl MainWindow {
             client_sender,
             status,
             status_tooltip,
-            item_list
+            item_list,
+            offline_label,
         });
 
         let keys = gtk4::EventControllerKey::new();
@@ -94,6 +107,12 @@ impl MainWindow {
         self.status_tooltip.set_label(text);
         self.status
             .set_css_classes(&["clipleaf-connection-status", if is_connected { "connected" } else { "disconnected" }]);
+        self.item_list.root.set_visible(is_connected);
+        self.offline_label.set_visible(!is_connected);
+        if !is_connected {
+            self.offline_label.set_label(text);
+            self.win.set_focus(None::<&gtk4::Widget>);
+        }
     }
 
     pub fn set_list(&self, list: ListReply) {
@@ -132,6 +151,9 @@ impl MainWindow {
     }
     pub fn show(&self) {
         self.win.present();
+        if self.item_list.root.is_visible() {
+            self.item_list.focus();
+        }
         let _ = self.client_sender.try_publish(ClientCommand::SetVisible);
     }
     pub fn hide(&self) {

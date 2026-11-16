@@ -1,16 +1,17 @@
-use std::cell::Ref;
+use std::{borrow::Cow, cell::Ref};
 
-use clipleaf_ipc::protocol::v1::models::{EntrySummary, Kind, ThumbState};
+use clipleaf_ipc::protocol::v1::models::{EntrySummary, Kind, ThumbState, TypeSummary};
 use gtk4::{
     gdk::{Paintable, Texture},
     glib,
     prelude::{GridExt, WidgetExt},
 };
+use percent_encoding::percent_decode;
 use unicode_segmentation::UnicodeSegmentation;
 
 const THUMB_WIDTH: i32 = 200;
 const THUMB_HEIGHT: i32 = 200;
-const MAX_TEXT_LINES: i32 = 10;
+const MAX_TEXT_LINES: i32 = 7;
 const MAX_TEXT_CHARS: usize = 1000;
 
 pub struct RowWidgets {
@@ -58,19 +59,22 @@ impl RowWidgets {
     }
 
     pub fn fill(&self, entry: &Ref<EntrySummary>) {
-        // log_debug!("Filling");
-        match entry.kind {
+        let Some(preferred_type) = entry.types.first() else {
+            self.clear();
+            return;
+        };
+        match preferred_type.kind {
             Kind::Text | Kind::Html | Kind::Markdown | Kind::Password => {
-                self.text.set_label(&self.display_text(&entry.preview));
-                self.meta_text.set_label(&self.meta_text_type(entry));
+                self.text.set_label(&self.display_text(&preferred_type.preview));
+                self.meta_text.set_label(&self.meta_text_type(preferred_type));
                 self.thumb.set_paintable(None::<&Paintable>);
                 self.thumb.set_visible(false);
             }
             Kind::Image => {
                 self.text.set_label("");
                 self.thumb.set_visible(true);
-                self.meta_text.set_label(&self.meta_image_type(entry));
-                let Some(ref t) = entry.thumb else {
+                self.meta_text.set_label(&self.meta_image_type(preferred_type));
+                let Some(ref t) = preferred_type.thumb else {
                     self.thumb.set_css_classes(&["clipleaf-list-item-thumb", "unavailable"]);
                     self.thumb.set_paintable(None::<&Paintable>);
                     return;
@@ -96,8 +100,8 @@ impl RowWidgets {
                 }
             }
             Kind::File => {
-                self.text.set_label(&self.display_text(&entry.preview));
-                self.meta_text.set_label(&self.meta_file_type(entry));
+                self.text.set_label(&self.display_text_files(&preferred_type.preview));
+                self.meta_text.set_label(&self.meta_file_type(preferred_type));
                 self.thumb.set_paintable(None::<&Paintable>);
                 self.thumb.set_visible(false);
             }
@@ -105,17 +109,9 @@ impl RowWidgets {
                 self.text.set_label("");
                 self.thumb.set_paintable(None::<&Paintable>);
                 self.thumb.set_visible(false);
-                match entry.types.first() {
-                    Some(first_type) => {
-                        let (unit, size) = get_unit_size(first_type.size);
-                        self.text.set_label(&first_type.mime);
-                        self.meta_text.set_label(&format!("{} {}", size, unit));
-                    }
-                    None => {
-                        self.text.set_label("");
-                        self.meta_text.set_label("");
-                    }
-                }
+                let (unit, size) = get_unit_size(preferred_type.size);
+                self.text.set_label(&preferred_type.mime);
+                self.meta_text.set_label(&format!("{} {}", size, unit));
             }
         }
     }
@@ -128,29 +124,27 @@ impl RowWidgets {
         self.meta_text.set_label("");
     }
 
-    fn meta_text_type(&self, entry: &EntrySummary) -> String {
-        let Some(first_type) = entry.types.first() else {
-            return "".to_owned();
-        };
-        let byte_size = first_type.size;
+    fn meta_text_type(&self, type_summary: &TypeSummary) -> String {
+        let byte_size = type_summary.size;
         let (unit, size) = get_unit_size(byte_size);
 
         format!("Text · {} {}", size, unit)
     }
 
-    fn meta_file_type(&self, entry: &EntrySummary) -> String {
-        format!("{} files", entry.file_count.unwrap_or_default())
+    fn meta_file_type(&self, type_summary: &TypeSummary) -> String {
+        match type_summary.file_count {
+            Some(1) => "1 file".into(),
+            Some(n) => format!("{n} files"),
+            None => "Files".into(),
+        }
     }
 
-    fn meta_image_type(&self, entry: &EntrySummary) -> String {
-        let Some(first_type) = entry.types.first() else {
-            return "".to_owned();
-        };
-        let byte_size = first_type.size;
-        let format = &first_type.mime;
+    fn meta_image_type(&self, type_summary: &TypeSummary) -> String {
+        let byte_size = type_summary.size;
+        let format = &type_summary.mime;
 
         let (unit, size) = get_unit_size(byte_size);
-        match &entry.thumb {
+        match &type_summary.thumb {
             Some(t) => format!(
                 "{} · {}x{} · {} {}",
                 format,
@@ -164,34 +158,57 @@ impl RowWidgets {
     }
 
     fn display_text(&self, bytes: &[u8]) -> String {
-        let text = match str::from_utf8(bytes) {
-            Ok(txt) => txt,
-            Err(e) if e.error_len().is_none() => str::from_utf8(&bytes[..e.valid_up_to()]).unwrap_or_default(),
-            Err(_) => &String::from_utf8_lossy(bytes),
-        };
-
+        let text = decode_utf8(bytes);
         let trimmed = text.trim_start_matches(['\n', '\r']);
-        let mut result = String::new();
+        limit_max_chars(trimmed)
+    }
 
-        let mut lines = 1;
-        for c in trimmed.graphemes(true).take(MAX_TEXT_CHARS) {
-            let is_break = match c {
-                "\r\n" | "\r" | "\n" | "\u{2029}" => true,
-                _ => {
-                    result.push_str(c);
-                    false
-                }
-            };
-            if is_break {
-                if lines == MAX_TEXT_LINES as usize + 1 {
-                    break;
-                }
-                lines += 1;
-                result.push('\u{2028}');
+    fn display_text_files(&self, bytes: &[u8]) -> String {
+        let mut names = Vec::new();
+        // +1 for GNOME copy/cut line, and another +1 so Pango sees extra content and ellipsizes.
+        for line in bytes.split(|&b| b == b'\n').take(MAX_TEXT_LINES as usize + 2) {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if line.is_empty() || line == b"copy" || line == b"cut" {
+                continue;
             }
+            if !names.is_empty() {
+                names.push(b'\n');
+            }
+            names.extend(percent_decode(line.strip_prefix(b"file://").unwrap_or(line)));
         }
+        limit_max_chars(&decode_utf8(&names))
+    }
+}
 
-        result
+fn limit_max_chars(s: &str) -> String {
+    let mut result = String::new();
+
+    let mut lines = 1;
+    for c in s.graphemes(true).take(MAX_TEXT_CHARS) {
+        let is_break = match c {
+            "\r\n" | "\r" | "\n" | "\u{2029}" => true,
+            _ => {
+                result.push_str(c);
+                false
+            }
+        };
+        if is_break {
+            if lines == MAX_TEXT_LINES as usize + 1 {
+                break;
+            }
+            lines += 1;
+            result.push('\u{2028}');
+        }
+    }
+
+    result
+}
+
+fn decode_utf8(bytes: &[u8]) -> Cow<'_, str> {
+    match str::from_utf8(bytes) {
+        Ok(s) => Cow::Borrowed(s),
+        Err(e) if e.error_len().is_none() => Cow::Borrowed(str::from_utf8(&bytes[..e.valid_up_to()]).unwrap_or_default()),
+        Err(_) => String::from_utf8_lossy(bytes),
     }
 }
 
