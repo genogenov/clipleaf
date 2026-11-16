@@ -196,6 +196,13 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
                 }
                 break;
             }
+
+            if self.out_buf.len() - self.out_pos < MAX_BACKPRESSURE_BYTES
+                && let Err(e) = self.read_from_buffer()
+            {
+                log_error!("Failed to read frame: {e}. Dropping connection.");
+                break;
+            }
         }
     }
 
@@ -250,6 +257,7 @@ impl<T: RequestMessageHandler> IpcClientConnection<T> {
     fn read_from_buffer(&mut self) -> Result<(), ProtocolError> {
         while self.reply_sink.pending < MAX_PENDING_REPLIES
             && !matches!(self.state, State::Closing { .. })
+            && self.out_buf.len() - self.out_pos < MAX_BACKPRESSURE_BYTES
             && let Some(res) = self.reader.next_frame()
         {
             let (header, body) = res?;

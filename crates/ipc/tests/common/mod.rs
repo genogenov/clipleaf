@@ -194,36 +194,41 @@ impl XorShift {
 
 // ---- Sample messages ----
 
+/// A cut of one file next to its image: a file list first, as the daemon orders types, then
+/// an image with a ready thumbnail.
 pub fn sample_entry(id: u64) -> EntrySummary {
     EntrySummary {
         id,
-        kind: Kind::Image,
         time_ms: 1_761_700_000_000 + id,
         pinned: id.is_multiple_of(2),
-        size: 123_456,
-        preview: vec![0, 1, 2, 0xff, b'a'],
         types: vec![
-            TypeSummary {
-                mime: "image/png".into(),
-                size: 100_000,
-            },
             TypeSummary {
                 mime: "text/uri-list".into(),
                 size: 23_456,
+                kind: Kind::File,
+                thumb: None,
+                file_count: Some(3),
+                preview: vec![0, 1, 2, 0xff, b'a'],
+            },
+            TypeSummary {
+                mime: "image/png".into(),
+                size: 100_000,
+                kind: Kind::Image,
+                thumb: Some(Thumb {
+                    state: ThumbState::Ready,
+                    format: Some("image/jpeg".into()),
+                    width: Some(128),
+                    height: Some(96),
+                    src_width: Some(4000),
+                    src_height: Some(3000),
+                    orientation: Some(6),
+                    has_alpha: Some(false),
+                    data: Some(vec![0xff, 0xd8, 0xff, 0xe0, 0, 0x10]),
+                }),
+                file_count: None,
+                preview: Vec::new(),
             },
         ],
-        thumb: Some(Thumb {
-            state: ThumbState::Ready,
-            format: Some("image/jpeg".into()),
-            width: Some(128),
-            height: Some(96),
-            src_width: Some(4000),
-            src_height: Some(3000),
-            orientation: Some(6),
-            has_alpha: Some(false),
-            data: Some(vec![0xff, 0xd8, 0xff, 0xe0, 0, 0x10]),
-        }),
-        file_count: Some(3),
         file_op: Some(FileOp::Cut),
         score: Some(0.75),
     }

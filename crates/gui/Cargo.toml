@@ -7,7 +7,7 @@ default-run = "clipleaf-default-gui"
 [dependencies]
 clipleaf-core = { path = "../core" }
 clipleaf-ipc = { path = "../ipc" }
-gtk4 = { version = "0.11.5", features = ["v4_18"] }
+gtk4 = { version = "0.11.5", features = ["v4_12"] }
 gtk4-layer-shell = { version = "0.8.1" }
 glib-unix = { version = "0.22.8" }
 unicode-segmentation ={ version = "1.13.3"}

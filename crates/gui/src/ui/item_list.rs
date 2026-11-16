@@ -1,6 +1,9 @@
 use clipleaf_ipc::protocol::v1::models::EntrySummary;
 use gtk4::{
-    ListScrollFlags, ListView, ScrolledWindow, SignalListItemFactory, SingleSelection, gio::{self, prelude::ListModelExt}, glib::{self, object::Cast}, prelude::{BoxExt, ListItemExt, RootExt, WidgetExt},
+    ListScrollFlags, ListView, ScrolledWindow, SignalListItemFactory, SingleSelection,
+    gio::{self, prelude::ListModelExt},
+    glib::{self, object::Cast},
+    prelude::{BoxExt, ListItemExt, RootExt, WidgetExt},
 };
 
 use crate::ui::row_widgets::RowWidgets;
@@ -45,6 +48,7 @@ impl ItemList {
         let empty_label = gtk4::Label::builder()
             .css_classes(["clipleaf-item-list-empty-label"])
             .label("No history yet")
+            .visible(false)
             .vexpand(true)
             .hexpand(true)
             .build();
@@ -89,11 +93,6 @@ impl ItemList {
         }
     }
 
-    pub fn clear_list(&self) {
-        self.item_list.remove_all();
-        self.show_empty(true);
-    }
-
     pub fn focus(&self) {
         if self.list_window.is_visible() {
             self.list_view.grab_focus();
@@ -105,6 +104,8 @@ impl ItemList {
         self.empty_label.set_visible(empty);
         if empty && let Some(root) = self.root.root() {
             root.set_focus(None::<&gtk4::Widget>);
+        } else if !empty {
+            self.focus();
         }
     }
 }

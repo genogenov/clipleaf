@@ -13,19 +13,19 @@ use clipleaf_test_common::raw::{
 use common::*;
 
 #[test]
-fn a_copy_is_fetched_as_its_best_text_and_image_and_kept_with_their_sizes() {
+fn a_copy_is_fetched_as_its_best_image_and_text_and_kept_with_their_sizes() {
     let mut daemon = Daemon::start();
     let a = daemon.new_offer();
     daemon.send(&[offer(a, &["text/html", UTF8, PNG, "application/x-foo"]), selection(a)]);
 
     let receives = daemon.receives_until(a);
     let mimes: Vec<&str> = receives.iter().map(|r| r.mime.as_str()).collect();
-    assert_eq!(mimes, [UTF8, PNG]);
-    let sizes = [5, 3];
+    assert_eq!(mimes, [PNG, UTF8]);
+    let sizes = [3, 5];
     for (receive, size) in receives.into_iter().zip(sizes) {
         answer(receive, &vec![b'x'; size]);
     }
-    assert_eq!(daemon.next_insert().sizes(), [(UTF8, 5), (PNG, 3)]);
+    assert_eq!(daemon.next_insert().sizes(), [(PNG, 3), (UTF8, 5)]);
 }
 
 #[test]
@@ -37,10 +37,10 @@ fn only_types_larger_than_the_inline_limit_get_a_file_and_it_holds_every_byte() 
     let entry = daemon.copy_new(&[(UTF8, b"hello"), (PNG, &image)]);
 
     let in_file: Vec<bool> = entry.types.iter().map(|t| t.in_file).collect();
-    assert_eq!(in_file, [false, true]);
-    assert_eq!(entry.types[0].head, b"hello");
-    // The image is fetch position 1 of this entry.
-    let name = format!("{}.1", entry.id);
+    assert_eq!(in_file, [true, false]);
+    assert_eq!(entry.types[1].head, b"hello");
+    // The image is fetch position 0 of this entry.
+    let name = format!("{}.0", entry.id);
     assert_eq!(state.payload_files(), [(name.clone(), image.len() as u64)]);
     assert_eq!(fs::read(state.payloads().join(name)).unwrap(), image);
 }

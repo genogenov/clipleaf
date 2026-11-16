@@ -154,13 +154,13 @@ fn halves(split_at: u32) -> impl Fn(u32, u32) -> [u8; 3] {
 
 #[test]
 fn a_png_gets_a_thumbnail_that_fits_256_px_and_keeps_its_colours() {
-    // With a text type before it: the thumbnail belongs to type 1.
+    // With a text type: the image is stored first, so the thumbnail belongs to type 0.
     let mut daemon = Daemon::start();
     let png = png_rgb(1024, 512, halves(512));
     let entry = daemon.copy_new(&[(UTF8, b"diagram.png"), (PNG, &png)]);
-    assert_eq!(entry.sizes(), [(UTF8, 11), (PNG, png.len() as u64)]);
+    assert_eq!(entry.sizes(), [(PNG, png.len() as u64), (UTF8, 11)]);
     let thumb = daemon.wait_thumb(entry.id).expect("a thumbnail");
-    assert_eq!(daemon.thumbs()[0].1, 1);
+    assert_eq!(daemon.thumbs()[0].1, 0);
     assert_eq!((thumb.width, thumb.height), (256, 128));
     assert_eq!((thumb.src_width, thumb.src_height), (1024, 512));
     assert_eq!((thumb.has_alpha, thumb.orientation), (false, 1));

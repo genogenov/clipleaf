@@ -20,7 +20,7 @@ pub struct PayloadFile {
 }
 
 impl PayloadFile {
-    pub fn head(&self) -> Option<&[u8]>{
+    pub fn head(&self) -> Option<&[u8]> {
         self.head.as_deref()
     }
 }

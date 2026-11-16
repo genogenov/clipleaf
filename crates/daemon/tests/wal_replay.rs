@@ -42,7 +42,7 @@ fn the_history_survives_a_restart_and_a_recopy_after_it_is_a_duplicate() {
     let a = daemon.copy_new(&a_types);
     let b = daemon.copy_new(&text(b"world"));
     let files = state.payload_files();
-    assert_eq!(files, [(format!("{}.1", a.id), 6000)]);
+    assert_eq!(files, [(format!("{}.0", a.id), 6000)]);
     daemon.stop();
 
     let mut daemon = Daemon::start_in(&state);

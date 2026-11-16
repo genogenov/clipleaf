@@ -1,10 +1,10 @@
 mod args;
 mod daemon_client;
 mod instance;
-mod ui;
 mod pubsub;
 mod state;
 mod style;
+mod ui;
 
 use std::{
     cell::Cell,
@@ -31,8 +31,8 @@ use crate::{
     args::{ArgCommand, StartState},
     daemon_client::spawn_client_worker,
     instance::Instance,
-    ui::main_window::MainWindow,
     state::{AppState, ConnState},
+    ui::main_window::MainWindow,
 };
 
 const EXIT_USAGE_ERROR: u8 = 2;
@@ -93,7 +93,7 @@ fn run(start: StartState) -> io::Result<gtk4::glib::ExitCode> {
         let main = MainWindow::new(app, client_sender.clone());
         let mut state = AppState {
             con_id: 0,
-            conn: ConnState::Connecting
+            conn: ConnState::Connecting,
         };
         main.warmup();
         if start == StartState::Shown {

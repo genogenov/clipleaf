@@ -25,7 +25,6 @@ impl AppState {
                 self.conn = ConnState::Connected { daemon };
                 self.con_id = connection_id;
                 main.set_status(&self.status_text(), true);
-                main.clear_list();
                 true
             }
             ClientEvent::Disconnected => {
@@ -42,7 +41,7 @@ impl AppState {
                 }
                 main.set_list(list);
                 true
-            },
+            }
         }
     }
     pub fn status_text(&self) -> String {

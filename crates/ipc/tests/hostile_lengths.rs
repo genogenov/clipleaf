@@ -30,10 +30,12 @@ fn one_field(k: &str, prefix: &[u8]) -> Vec<u8> {
     v
 }
 
-/// {entries: [{preview: <prefix>}]}: a byte field one level down.
+/// {entries: [{types: [{preview: <prefix>}]}]}: a byte field two levels down.
 fn entries_preview(prefix: &[u8]) -> Vec<u8> {
     let mut v = vec![0x81];
     v.extend(key("entries"));
+    v.extend([0x91, 0x81]);
+    v.extend(key("types"));
     v.extend([0x91, 0x81]);
     v.extend(key("preview"));
     v.extend(prefix);
@@ -60,7 +62,7 @@ fn huge_declared_lengths_fail_fast_without_allocating() {
         ("Hello.versions array32", one_field("versions", &ARRAY32_MAX), |b| {
             decode_body::<Hello>(b).is_err()
         }),
-        ("ListReply.entries[0].preview bin32", entries_preview(&BIN32_MAX), |b| {
+        ("ListReply.entries[0].types[0].preview bin32", entries_preview(&BIN32_MAX), |b| {
             decode_body::<ListReply>(b).is_err()
         }),
         ("Restore.mime str32", one_field("mime", &STR32_MAX), |b| {

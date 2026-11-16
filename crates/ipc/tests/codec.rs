@@ -116,17 +116,22 @@ fn every_message_round_trips() {
         req(R::List),
     );
     let mut bare = sample_entry(2);
-    bare.kind = Kind::Text;
-    bare.thumb = None;
-    bare.file_count = None;
     bare.file_op = None;
     bare.score = None;
-    bare.types.clear();
-    bare.preview.clear();
+    bare.types = vec![TypeSummary {
+        mime: "text/plain".into(),
+        size: 0,
+        kind: Kind::Text,
+        thumb: None,
+        file_count: None,
+        preview: Vec::new(),
+    }];
+    let mut no_types = sample_entry(3);
+    no_types.types.clear();
     round_trip(
         ListReply {
-            entries: vec![sample_entry(1), bare],
-            total: 2,
+            entries: vec![sample_entry(1), bare, no_types],
+            total: 3,
         },
         rep(R::List),
     );
@@ -135,9 +140,10 @@ fn every_message_round_trips() {
         for state in [ThumbState::Ready, ThumbState::Pending, ThumbState::Unavailable] {
             for op in [FileOp::Cut, FileOp::Copy] {
                 let mut e = sample_entry(9);
-                e.kind = kind;
-                e.thumb.as_mut().unwrap().state = state;
-                e.thumb.as_mut().unwrap().data = None;
+                let image = &mut e.types[1];
+                image.kind = kind;
+                image.thumb.as_mut().unwrap().state = state;
+                image.thumb.as_mut().unwrap().data = None;
                 e.file_op = Some(op);
                 round_trip(Added { entry: e.clone() }, [4, 1]);
             }
@@ -219,7 +225,7 @@ fn encode_frame_over_cap_truncates_back_to_prior_content() {
 
     let mut buf = Vec::new();
     let mut entry = sample_entry(1);
-    entry.preview = vec![0; 70_000];
+    entry.types[0].preview = vec![0; 70_000];
     let big = Added { entry };
     assert!(matches!(encode_frame(1, &big, &mut buf, 64 * 1024), Err(ProtocolError::FrameTooBig)));
     assert!(buf.is_empty());
@@ -257,8 +263,8 @@ fn bodies_are_named_maps_with_snake_case_strings_and_bin_bytes() {
 
     // Byte fields are bin (0xc4 len bytes), not arrays: the preview and the thumbnail data.
     let mut entry = sample_entry(1);
-    entry.preview = vec![9, 9];
-    entry.thumb.as_mut().unwrap().data = Some(vec![7, 7, 7]);
+    entry.types[0].preview = vec![9, 9];
+    entry.types[1].thumb.as_mut().unwrap().data = Some(vec![7, 7, 7]);
     let body = body_of(&Added { entry });
     let mut preview = vec![0xa7];
     preview.extend(b"preview");
@@ -315,17 +321,23 @@ struct RawThumb {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct RawEntry {
-    id: u64,
-    kind: String,
-    time_ms: u64,
-    pinned: bool,
+struct RawType {
+    mime: String,
     size: u64,
+    kind: String,
     #[serde(with = "serde_bytes")]
     preview: Vec<u8>,
-    types: Vec<TypeSummary>,
     thumb: Option<RawThumb>,
     file_count: Option<u32>,
+    new_type_field: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct RawEntry {
+    id: u64,
+    time_ms: u64,
+    pinned: bool,
+    types: Vec<RawType>,
     file_op: Option<String>,
     score: Option<f32>,
     new_field: BTreeMap<String, u64>,
@@ -407,21 +419,21 @@ test_message! {
 fn raw_entry(kind: &str, file_op: Option<&str>, thumb_state: &str) -> RawEntry {
     RawEntry {
         id: 77,
-        kind: kind.into(),
         time_ms: 5,
         pinned: true,
-        size: 10,
-        preview: b"hi\xff".to_vec(),
-        types: vec![TypeSummary {
+        types: vec![RawType {
             mime: "text/plain".into(),
             size: 10,
+            kind: kind.into(),
+            preview: b"hi\xff".to_vec(),
+            thumb: Some(RawThumb {
+                glow: 9,
+                state: thumb_state.into(),
+                width: Some(64),
+            }),
+            file_count: None,
+            new_type_field: vec![1, 2],
         }],
-        thumb: Some(RawThumb {
-            glow: 9,
-            state: thumb_state.into(),
-            width: Some(64),
-        }),
-        file_count: None,
         file_op: file_op.map(Into::into),
         score: Some(1.5),
         new_field: BTreeMap::from([("a".into(), 1), ("b".into(), u64::MAX)]),
@@ -452,11 +464,13 @@ fn nested_superset_with_missing_optional_fields_decodes() {
     let got = decode_body::<ListReply>(&body_of(&raw)).unwrap();
     assert_eq!(got.total, 1);
     let e = &got.entries[0];
-    assert_eq!((e.id, e.kind, e.pinned, e.size), (77, Kind::Text, true, 10));
-    assert_eq!(e.preview, b"hi\xff");
+    assert_eq!((e.id, e.pinned), (77, true));
+    let ty = &e.types[0];
+    assert_eq!((ty.mime.as_str(), ty.kind, ty.size, ty.file_count), ("text/plain", Kind::Text, 10, None));
+    assert_eq!(ty.preview, b"hi\xff");
     assert_eq!(e.file_op, Some(FileOp::Cut));
     assert_eq!(e.score, Some(1.5));
-    let t = e.thumb.as_ref().unwrap();
+    let t = ty.thumb.as_ref().unwrap();
     assert_eq!(t.state, ThumbState::Pending);
     assert_eq!(t.width, Some(64));
     // fields absent on the wire: Option -> None, defaulted bytes -> None
@@ -507,7 +521,7 @@ fn missing_defaulted_and_optional_fields_decode() {
         entry: raw_entry("image", None, "ready"),
     }))
     .unwrap();
-    assert_eq!(old.entry.thumb.unwrap().data, None);
+    assert_eq!(old.entry.types[0].thumb.as_ref().unwrap().data, None);
     // Option fields missing
     assert_eq!(
         decode_body::<StatusReply>(&body_of(&StatusReply {
@@ -543,9 +557,9 @@ fn unknown_enum_values_fall_back_where_safe() {
         entry: raw_entry("video", Some("move"), "exploded"),
     };
     let got = decode_body::<Added>(&body_of(&added)).unwrap().entry;
-    assert_eq!(got.kind, Kind::Other);
+    assert_eq!(got.types[0].kind, Kind::Other);
     assert_eq!(got.file_op, Some(FileOp::Copy));
-    assert_eq!(got.thumb.unwrap().state, ThumbState::Unavailable);
+    assert_eq!(got.types[0].thumb.as_ref().unwrap().state, ThumbState::Unavailable);
 
     // known values still map exactly
     let known = decode_body::<Added>(&body_of(&RawAdded {
@@ -554,7 +568,7 @@ fn unknown_enum_values_fall_back_where_safe() {
     .unwrap()
     .entry;
     assert_eq!(
-        (known.kind, known.file_op, known.thumb.unwrap().state),
+        (known.types[0].kind, known.file_op, known.types[0].thumb.as_ref().unwrap().state),
         (Kind::Markdown, Some(FileOp::Copy), ThumbState::Ready)
     );
 
@@ -750,7 +764,11 @@ fn sequences_over_their_element_cap_are_errors() {
         e.types = vec![
             TypeSummary {
                 mime: String::new(),
-                size: 0
+                size: 0,
+                kind: Kind::Other,
+                thumb: None,
+                file_count: None,
+                preview: Vec::new(),
             };
             n
         ];

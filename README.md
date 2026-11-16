@@ -37,7 +37,7 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
   - [x] Closes with Esc or a click outside the pop-up
   - [x] Daemon connection status, reconnecting on its own
   - [x] Style overrides in your own `style.css`
-  - [ ] History list with text previews, image thumbnails and file lists
+  - [x] History list with text previews, image thumbnails and file lists
   - [ ] Restore the picked entry
   - [ ] Paste into the focused app after picking
   - [ ] Search

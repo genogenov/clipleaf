@@ -12,7 +12,6 @@
   - WebP thumbnails
   - Tests and benchmarks: copy-to-recorded time, pastes served by the daemon, memory, compared with cursor-clip
 - GUI `clipleaf-default-gui`
-  - History list: text previews, image thumbnails, file lists, newest first
   - Restore the picked entry with Enter or a click
   - Paste into the focused app after picking, with a checkbox that remembers the choice
   - Search box

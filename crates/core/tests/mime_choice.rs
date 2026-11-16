@@ -28,7 +28,8 @@ fn the_best_text_and_the_best_image_are_fetched_and_nothing_else() {
         "UTF8_STRING",
         "chromium/x-source-url",
     ];
-    assert_eq!(fetch(&offered), ["text/plain;charset=utf-8", "image/png"]);
+    // Stored in display order: the image before the text.
+    assert_eq!(fetch(&offered), ["image/png", "text/plain;charset=utf-8"]);
 }
 
 #[test]
@@ -49,7 +50,7 @@ fn jpeg_is_fetched_when_there_is_no_png_and_else_the_first_image_offered() {
 }
 
 #[test]
-fn every_file_list_type_is_fetched_after_the_text_and_the_cut_marker_last() {
+fn every_file_list_type_is_fetched_first_then_the_text_and_the_cut_marker_last() {
     // What a file manager offers (Nautilus / Dolphin), in their order.
     let offered = [
         "x-special/gnome-copied-files",
@@ -63,10 +64,10 @@ fn every_file_list_type_is_fetched_after_the_text_and_the_cut_marker_last() {
     assert_eq!(
         fetch(&offered),
         [
-            "text/plain;charset=utf-8",
             "x-special/gnome-copied-files",
             "text/uri-list",
             "application/x-kde4-urilist",
+            "text/plain;charset=utf-8",
             "application/x-kde-cutselection",
         ]
     );
@@ -78,7 +79,7 @@ fn the_cut_marker_is_never_fetched_without_a_file_list() {
     assert_eq!(fetch(&["application/x-kde-cutselection", "text/plain"]), ["text/plain"]);
     // Nor does it take a slot from the types that are fetched.
     let offered = ["text/plain", "application/x-kde-cutselection", "image/png"];
-    assert_eq!(fetch_capped(&offered, 2), ["text/plain", "image/png"]);
+    assert_eq!(fetch_capped(&offered, 2), ["image/png", "text/plain"]);
 }
 
 #[test]
@@ -90,13 +91,19 @@ fn under_a_tight_cap_a_fetched_file_list_keeps_its_cut_marker() {
         "text/uri-list",
         "image/png",
     ];
-    assert_eq!(fetch_capped(&offered, 3), ["text/plain;charset=utf-8", "image/png"]);
+    // The cap keeps the first types in stored order (file lists, image, text), and the marker
+    // costs a slot only when a list is kept. The daemon's cap (MAX_FETCHED_TYPES = 10) is above
+    // the 6 types it can ever pick, so this only matters if more file-list types are added.
+    assert_eq!(
+        fetch_capped(&offered, 3),
+        ["x-special/gnome-copied-files", "text/uri-list", "application/x-kde-cutselection"]
+    );
     assert_eq!(
         fetch_capped(&offered, 4),
         [
-            "text/plain;charset=utf-8",
-            "image/png",
             "x-special/gnome-copied-files",
+            "text/uri-list",
+            "image/png",
             "application/x-kde-cutselection",
         ]
     );
@@ -104,10 +111,10 @@ fn under_a_tight_cap_a_fetched_file_list_keeps_its_cut_marker() {
         assert_eq!(
             fetch_capped(&offered, cap),
             [
-                "text/plain;charset=utf-8",
-                "image/png",
                 "x-special/gnome-copied-files",
                 "text/uri-list",
+                "image/png",
+                "text/plain;charset=utf-8",
                 "application/x-kde-cutselection",
             ],
             "cap {cap}"
@@ -126,7 +133,7 @@ fn nothing_known_means_nothing_fetched_and_the_cap_is_honored() {
     assert!(fetch(&[]).is_empty());
     let offered = ["text/plain", "image/png", "text/uri-list"];
     let picked: Vec<&str> = pick_fetch_mimes(&offered, 2).iter().map(|m| *m.mime()).collect();
-    assert_eq!(picked, ["text/plain", "image/png"]);
+    assert_eq!(picked, ["text/uri-list", "image/png"]);
 }
 
 #[test]

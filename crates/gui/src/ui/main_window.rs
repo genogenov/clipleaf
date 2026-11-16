@@ -119,10 +119,6 @@ impl MainWindow {
         self.item_list.set_list(list.entries);
     }
 
-    pub fn clear_list(&self) {
-        self.item_list.clear_list();
-    }
-
     pub fn warmup(self: &Rc<Self>) {
         self.warming.set(true);
         self.win.set_keyboard_mode(KeyboardMode::None);

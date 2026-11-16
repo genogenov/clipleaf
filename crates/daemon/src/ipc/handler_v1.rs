@@ -1,7 +1,8 @@
 use std::io;
 
 use clipleaf_core::{
-    ContentKind, mime_types::{GNOME_COPIED_FILES, KDE_CUT_MARKER},
+    ContentKind,
+    mime_types::{GNOME_COPIED_FILES, KDE_CUT_MARKER},
 };
 use clipleaf_ipc::protocol::{
     handshake::{ErrorCode, ErrorReply, Hello, HelloReply},
@@ -54,7 +55,7 @@ impl RequestMessageHandler for HandlerV1 {
         let entries = snapshot
             .items
             .iter()
-            .skip(msg.offset as usize)
+            .skip(usize::try_from(msg.offset).unwrap_or(usize::MAX))
             .take(msg.limit.unwrap_or(100).min(100) as usize)
             .map(|item| build_summary(item, msg.thumbs));
 

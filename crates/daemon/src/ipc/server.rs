@@ -10,7 +10,9 @@ use std::{
 use clipleaf_core::{ffi::event_fd::EventFd, log_debug, log_warn};
 
 use crate::{
-    index::SnapshotHandle, ipc::{handler_v1::HandlerV1, listener::IpcListener}, storage::lock_file,
+    index::SnapshotHandle,
+    ipc::{handler_v1::HandlerV1, listener::IpcListener},
+    storage::lock_file,
 };
 
 pub struct IpcServer {

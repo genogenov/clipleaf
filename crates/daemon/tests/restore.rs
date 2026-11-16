@@ -41,9 +41,9 @@ fn a_cleared_clipboard_gets_the_newest_entry_back_with_every_stored_type() {
     daemon.send(&[cleared()]);
     let source = daemon.wait_restore();
 
-    // Stored order, the text type under every standard text name, the marker last.
-    let mut expected: Vec<&str> = TEXT_NAMES.to_vec();
-    expected.push(PNG);
+    // Stored order (the image, then the text under every standard text name), the marker last.
+    let mut expected: Vec<&str> = vec![PNG];
+    expected.extend(TEXT_NAMES);
     assert_eq!(source.mimes[..6], expected[..], "{:?}", source.mimes);
     assert_eq!(source.mimes.len(), 7, "{:?}", source.mimes);
     let marker = &source.mimes[6];
