@@ -116,7 +116,7 @@ impl MainWindow {
     }
 
     pub fn set_list(&self, list: ListReply) {
-        self.item_list.set_list(list.entries);
+        self.item_list.set_list(list);
     }
 
     pub fn warmup(self: &Rc<Self>) {

@@ -1,8 +1,13 @@
-use clipleaf_ipc::protocol::v1::models::EntrySummary;
+use std::collections::HashMap;
+
+use clipleaf_ipc::protocol::v1::models::{EntrySummary, ListReply};
 use gtk4::{
     ListScrollFlags, ListView, ScrolledWindow, SignalListItemFactory, SingleSelection,
     gio::{self, prelude::ListModelExt},
-    glib::{self, object::Cast},
+    glib::{
+        self,
+        object::{Cast, CastNone},
+    },
     prelude::{BoxExt, ListItemExt, RootExt, WidgetExt},
 };
 
@@ -13,6 +18,7 @@ pub struct ItemList {
     list_window: ScrolledWindow,
     empty_label: gtk4::Label,
     list_view: ListView,
+    count_label: gtk4::Label,
     pub root: gtk4::Box,
     _selection: SingleSelection,
     _factory: SignalListItemFactory,
@@ -53,6 +59,12 @@ impl ItemList {
             .hexpand(true)
             .build();
 
+        let count_label = gtk4::Label::builder()
+            .css_classes(["clipleaf-item-list-count-label"])
+            .valign(gtk4::Align::End)
+            .halign(gtk4::Align::Center)
+            .build();
+
         let list_window = ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .vexpand(true)
@@ -70,6 +82,7 @@ impl ItemList {
 
         root.append(&list_window);
         root.append(&empty_label);
+        root.append(&count_label);
 
         Self {
             item_list,
@@ -79,15 +92,32 @@ impl ItemList {
             _factory: factory,
             empty_label,
             root,
+            count_label,
         }
     }
 
-    pub fn set_list(&self, entires: Vec<EntrySummary>) {
-        let objs: Vec<glib::BoxedAnyObject> = entires.into_iter().map(glib::BoxedAnyObject::new).collect();
+    pub fn set_list(&self, reply: ListReply) {
+        let len = reply.total;
+        let mut old: HashMap<u64, glib::BoxedAnyObject> = (0..self.item_list.n_items())
+            .filter_map(|i| self.item_list.item(i).and_downcast::<glib::BoxedAnyObject>())
+            .map(|b| {
+                let id = b.borrow::<EntrySummary>().id;
+                (id, b)
+            })
+            .collect();
+        let objs: Vec<glib::BoxedAnyObject> = reply
+            .entries
+            .into_iter()
+            .map(|e| match old.remove(&e.id) {
+                Some(b) if *b.borrow::<EntrySummary>() == e => b,
+                _ => glib::BoxedAnyObject::new(e),
+            })
+            .collect();
         self.item_list.splice(0, self.item_list.n_items(), &objs);
         if objs.is_empty() {
             self.show_empty(true);
         } else {
+            self.count_label.set_label(&format!("{} items", len));
             self.show_empty(false);
             self.list_view.scroll_to(0, ListScrollFlags::FOCUS | ListScrollFlags::SELECT, None);
         }
@@ -101,6 +131,7 @@ impl ItemList {
 
     fn show_empty(&self, empty: bool) {
         self.list_window.set_visible(!empty);
+        self.count_label.set_visible(!empty);
         self.empty_label.set_visible(empty);
         if empty && let Some(root) = self.root.root() {
             root.set_focus(None::<&gtk4::Widget>);

@@ -14,6 +14,7 @@ use std::{
 };
 
 const DEFAULT_GDK_RENDERER: &str = "gl";
+const DEFAULT_GSK_CACHE_TIMEOUT: &str = "3600";
 const SIGTERM: i32 = 15;
 const SIGINT: i32 = 2;
 
@@ -121,6 +122,10 @@ fn build_app() -> Application {
     // }
     if env::var_os("GSK_RENDERER").is_none() {
         unsafe { env::set_var("GSK_RENDERER", DEFAULT_GDK_RENDERER) };
+    }
+
+    if env::var_os("GSK_CACHE_TIMEOUT").is_none() {
+        unsafe { env::set_var("GSK_CACHE_TIMEOUT", DEFAULT_GSK_CACHE_TIMEOUT) };
     }
 
     gdk::set_allowed_backends("wayland");

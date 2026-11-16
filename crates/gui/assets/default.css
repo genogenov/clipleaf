@@ -16,7 +16,7 @@ tooltip {
     color: #cdd6f4;
     border: 1px solid alpha(#cdd6f4, 0.08);
     border-radius: 12px;
-    padding: 8px;
+    padding: 5px;
     min-width: 380px;
     min-height: 460px;
     box-shadow: 0 8px 24px alpha(black, 0.45);
@@ -82,23 +82,23 @@ listview.clipleaf-item-list {
     color: inherit;
 }
 
-listview.clipleaf-item-list > row {
+listview.clipleaf-item-list>row {
     margin: 1px 2px;
     border-radius: 8px;
     background: transparent;
     outline: none;
 }
 
-listview.clipleaf-item-list > row:hover {
+listview.clipleaf-item-list>row:hover {
     background-color: alpha(#cdd6f4, 0.05);
 }
 
-listview.clipleaf-item-list > row:selected {
+listview.clipleaf-item-list>row:selected {
     background-color: alpha(#89b4fa, 0.18);
     color: inherit;
 }
 
-listview.clipleaf-item-list > row:selected:focus-visible {
+listview.clipleaf-item-list>row:selected:focus-visible {
     box-shadow: inset 0 0 0 1px alpha(#89b4fa, 0.6);
 }
 
@@ -118,8 +118,13 @@ listview.clipleaf-item-list > row:selected:focus-visible {
     margin-top: 2px;
 }
 
-.clipleaf-list-item-thumb {
+.clipleaf-item-list-count-label {
+    color: #a6adc8;
+    padding-top: 5px;
+    font-size: smaller;
 }
+
+.clipleaf-list-item-thumb {}
 
 .clipleaf-list-item-thumb.pending,
 .clipleaf-list-item-thumb.unavailable {
